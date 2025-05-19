@@ -1,94 +1,127 @@
 import tkinter as tk
-from tkinter import ttk, filedialog
-from PIL import Image, ImageTk
-import os
+from tkinter import ttk
+from datetime import datetime
+import requests
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import db 
 
 
-students = [
-    {"name": "Micoh Alon", "photo": "profile1.jpg"},
-    {"name": "Joyce Insorio", "photo": "profile2.jpg"},
-    {"name": "Mark Solero", "photo": "profile3.jpg"},
-    {"name": "Warren Tuazon", "photo": "profile4.jpg"},
-    {"name": "Sharina Silva", "photo": "profile5.jpg"},
-    {"name": "Jurie Imperial", "photo": "profile6.jpg"},
-    {"name": "Pascual Placios", "photo": "profile7.jpg"},
+# --- Setup ---
+root = tk.Tk()
+root.title("ClassTrack - Attendance")
+root.geometry("900x600")
+root.configure(bg='#f3f6fc')
+
+cred_path = r'C:\Users\pc\Downloads\database.json'
+cred = credentials.Certificate(cred_path)
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app/'
+})
+ref = db.reference('/')
+# --- Colors ---
+COLORS = {
+    "present": "#d4f5d2",
+    "absent": "#fbd6d6",
+    "late": "#fff4c2",
+    "total": "#e3d9fb",
+    "card_bg": "white",
+    "button": "#e0e7ff",
+    "navbar": "#e5efff",
+    "purple": "#6366f1",
+    "gray": "#6b7280"
+}
+
+# --- Top Bar ---
+top_frame = tk.Frame(root, bg=COLORS['navbar'], height=50)
+top_frame.pack(fill='x')
+
+date_label = tk.Label(top_frame, text=datetime.now().strftime("%A, %B %d, %Y"), font=('Segoe UI', 10), bg=COLORS['navbar'])
+date_label.pack(side='left', padx=10, pady=10)
+
+save_btn = tk.Button(top_frame, text="💾 Save Attendance", bg=COLORS['purple'], fg="white", font=('Segoe UI', 10, 'bold'))
+save_btn.pack(side='right', padx=10, pady=10)
+
+# --- Summary ---
+summary_frame = tk.Frame(root, bg='#f3f6fc')
+summary_frame.pack(fill='x', padx=20, pady=10)
+
+summaries = [
+    ("Present", 0, COLORS['present']),
+    ("Absent", 0, COLORS['absent']),
+    ("Late", 0, COLORS['late']),
+    ("Total", 0, COLORS['total'])
 ]
 
- 
-for s in students:
-    if not os.path.exists(s["photo"]):
-        s["photo"] = "default.png"  
+for title, count, color in summaries:
+    card = tk.Frame(summary_frame, bg=color, width=100, height=60, padx=10, pady=10)
+    card.pack(side='left', padx=10)
+    tk.Label(card, text=title, font=('Segoe UI', 10, 'bold'), bg=color).pack()
+    tk.Label(card, text=str(count), font=('Segoe UI', 14), bg=color).pack()
 
-root = tk.Tk()
-root.title("Attendance System")
-root.geometry("1000x600")
-root.configure(bg="white")
+# --- Filter ---
+filter_frame = tk.Frame(root, bg='#f3f6fc')
+filter_frame.pack(fill='x', padx=20)
+tk.Label(filter_frame, text="Filter:", font=('Segoe UI', 10), bg='#f3f6fc').pack(side='left')
+filter_dropdown = ttk.Combobox(filter_frame, values=["All Students", "Present", "Absent", "Late"], state='readonly')
+filter_dropdown.set("All Students")
+filter_dropdown.pack(side='left', padx=5)
 
+# --- Student Cards Grid ---
+cards_frame = tk.Frame(root, bg='#f3f6fc')
+cards_frame.pack(padx=20, pady=10, fill='both', expand=True)
 
-sidebar = tk.Frame(root, bg="#2f3e9e", width=180)
-sidebar.pack(side="left", fill="y")
-menu_items = ["Dashboard", "Attendance", "Class Schedule", "Reports", "Calendar"]
-for item in menu_items:
-    tk.Button(sidebar, text=item, bg="#2f3e9e", fg="white", bd=0, font=("Arial", 12), anchor="w", padx=20).pack(fill="x", pady=5)
+FIREBASE_URL = "https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app"
 
-topbar = tk.Frame(root, bg="#f5f5f5", height=50)
-topbar.pack(fill="x")
-tk.Label(topbar, text="Attendance", bg="#f5f5f5", font=("Arial", 14, "bold")).pack(side="left", padx=20)
+def fetch_students():
+    try:
+        url = f"{FIREBASE_URL}/students.json"
+        response = requests.get(url)
+        if response.status_code == 200 and response.json():
+            data = response.json()
+            # Firebase returns a dict of dicts
+            students = []
+            for key, value in data.items():
+                name = value.get('name', 'Unknown')
+                status = value.get('status', 'Present')
+                emoji = value.get('emoji', '😊')
+                students.append((name, status, emoji))
+            return students
+        else:
+            return []
+    except Exception as e:
+        print(f"Error fetching students: {e}")
+        return []
 
+def populate_student_cards():
+    # Remove any existing cards
+    for widget in cards_frame.winfo_children():
+        widget.destroy()
+    students = fetch_students()
+    cols = 3
+    for i, student in enumerate(students):
+        card = create_card(cards_frame, *student)
+        card.grid(row=i//cols, column=i%cols, padx=10, pady=10, sticky='n')
+    if not students:
+        tk.Label(cards_frame, text="No students found in database.", font=('Segoe UI', 12), bg='#f3f6fc').pack(pady=20)
 
-content = tk.Frame(root, bg="white")
-content.pack(fill="both", expand=True)
+def create_card(parent, name, status, emoji):
+    frame = tk.Frame(parent, bg=COLORS['card_bg'], relief='solid', bd=1)
+    tk.Label(frame, text=f"👤 {name}", font=('Segoe UI', 10, 'bold'), bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=5)
 
-canvas = tk.Canvas(content, bg="white")
-scrollbar = tk.Scrollbar(content, orient="vertical", command=canvas.yview)
-scrollable_frame = tk.Frame(canvas, bg="white")
+    status_frame = tk.Frame(frame, bg=COLORS['card_bg'])
+    status_frame.pack(anchor='w', padx=10)
+    for s in ["Present", "Absent", "Late"]:
+        bg = "#10b981" if s == status else "#e5e7eb"
+        tk.Label(status_frame, text=s, bg=bg, fg="white" if s == status else "black", padx=5).pack(side='left', padx=2)
 
-scrollable_frame.bind(
-    "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-)
+    tk.Label(frame, text="Emotional Status:", font=('Segoe UI', 9), bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=(5, 0))
+    tk.Label(frame, text=emoji, font=('Segoe UI', 20), bg=COLORS['card_bg']).pack(anchor='w', padx=10)
 
-canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-canvas.configure(yscrollcommand=scrollbar.set)
+    report_btn = tk.Button(frame, text="📩 Report to Parent", font=('Segoe UI', 9), bg=COLORS['button'])
+    report_btn.pack(padx=10, pady=5)
+    return frame
 
-canvas.pack(side="left", fill="both", expand=True)
-scrollbar.pack(side="right", fill="y")
-
-
-def load_image(path):
-    img = Image.open(path).resize((80, 80))
-    return ImageTk.PhotoImage(img)
-
-images = {}
-for student in students:
-    images[student["name"]] = load_image(student["photo"])
-
-
-def mark_attendance(name, status):
-    print(f"{name} marked as {status}")
-
-def change_image(name, label):
-    filepath = filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg;*.jpeg")])
-    if filepath:
-        students_dict[name] = filepath
-        images[name] = load_image(filepath)
-        label.config(image=images[name])
-
-students_dict = {student["name"]: student["photo"] for student in students}
-
-for i, student in enumerate(students):
-    card = tk.Frame(scrollable_frame, bd=1, relief="solid", padx=10, pady=10, bg="white")
-    card.grid(row=i // 4, column=i % 4, padx=10, pady=10)
-
-    img_label = tk.Label(card, image=images[student["name"]], bg="white")
-    img_label.pack()
-    img_label.bind("<Button-1>", lambda e, n=student["name"], l=img_label: change_image(n, l))
-
-    tk.Label(card, text=student["name"], bg="white", font=("Arial", 10, "bold")).pack(pady=5)
-
-    btn_frame = tk.Frame(card, bg="white")
-    btn_frame.pack()
-    tk.Button(btn_frame, text="P", width=2, bg="#4caf50", fg="white", command=lambda n=student["name"]: mark_attendance(n, "Present")).pack(side="left", padx=2)
-    tk.Button(btn_frame, text="A", width=2, bg="#f44336", fg="white", command=lambda n=student["name"]: mark_attendance(n, "Absent")).pack(side="left", padx=2)
-    tk.Button(btn_frame, text="L", width=2, bg="#ff9800", fg="white", command=lambda n=student["name"]: mark_attendance(n, "Late")).pack(side="left", padx=2)
+populate_student_cards()
 
 root.mainloop()

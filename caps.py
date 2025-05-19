@@ -8,28 +8,22 @@ import os
 import pickle
 import time
 import threading
-from fer import FER  
+from fer import FER
+import requests
+import datetime
+import firebase_admin
+from firebase_admin import credentials
+from firebase_admin import db 
+import base64
 
-ENCODINGS_FILE = "encodings.pickle"
+FIREBASE_URL = "https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app"
+cred_path = r'C:\Users\pc\Downloads\database.json'
+cred = credentials.Certificate(cred_path)
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app/'
+})
+# --- Utility Functions ---
 
-def save_encoding(name, encoding):
-    if os.path.exists(ENCODINGS_FILE):
-        with open(ENCODINGS_FILE, "rb") as f:
-            data = pickle.load(f)
-    else:
-        data = {}
-    data[name] = encoding.tolist()
-    with open(ENCODINGS_FILE, "wb") as f:
-        pickle.dump(data, f)
-
-def load_encodings():
-    if not os.path.exists(ENCODINGS_FILE):
-        return [], []
-    with open(ENCODINGS_FILE, "rb") as f:
-        data = pickle.load(f)
-    names = list(data.keys())
-    encodings = [np.array(e) for e in data.values()]
-    return encodings, names
 
 def is_face_moving(threshold=10):
     positions = []
@@ -55,65 +49,43 @@ def is_face_moving(threshold=10):
 # --- GUI Setup ---
 root = tk.Tk()
 root.title("Face Login/Register with Emotion Analysis")
-root.geometry("700x450")
-root.configure(bg='white')
+root.geometry("800x500")
+root.configure(bg="#f2f2f2")
 
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+cap.set(cv2.CAP_PROP_FPS, 30)
 
-camera_frame = tk.Frame(root, width=300, height=250, bg='white', highlightbackground="black", highlightthickness=3)
-camera_frame.place(x=30, y=30)
-camera_label = tk.Label(camera_frame)
+header = tk.Label(root, text="Emotion-Based Attendance System", font=("Helvetica", 18, "bold"), bg="#f2f2f2", fg="#333")
+header.pack(pady=10)
+
+camera_frame = tk.Frame(root, width=400, height=300, bg="#1e1e1e", highlightbackground="black", highlightthickness=1)
+camera_frame.place(x=50, y=80)
+
+camera_label = tk.Label(camera_frame, bg="#1e1e1e")
 camera_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
-emotion_label = tk.Label(root, text="Emotion: ", font=("Helvetica", 14), bg="white")
-emotion_label.place(x=30, y=300)
+emotion_label = tk.Label(root, text="Emotion: Detecting... (0.00)", font=("Helvetica", 12), bg="#f2f2f2", fg="#555")
+emotion_label.place(x=50, y=400)
 
-known_face_encodings, known_face_names = load_encodings()
-emotion_detector = FER(mtcnn=True)
+btn_frame = tk.Frame(root, bg="#f2f2f2")
+btn_frame.place(x=500, y=150)
 
-# --- Frame Capture Thread Setup ---
-frame_lock = threading.Lock()
-current_frame = None
+def create_button(master, text, bg_color, command=None):
+    return tk.Button(master, text=text, width=20, height=2,
+                     bg=bg_color, fg="white", font=("Helvetica", 12, "bold"),
+                     relief="flat", activebackground="#444", command=command)
 
-def capture_frames():
-    global current_frame
-    while True:
-        ret, frame = cap.read()
-        if ret:
-            with frame_lock:
-                current_frame = frame.copy()
-
-def update_camera():
-    with frame_lock:
-        frame = current_frame.copy() if current_frame is not None else None
-
-    if frame is not None:
-        # Resize for display to improve performance
-        resized_frame = cv2.resize(frame, (300, 250))
-        rgb_display = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
-        img = Image.fromarray(rgb_display)
-        imgtk = ImageTk.PhotoImage(image=img)
-        camera_label.imgtk = imgtk
-        camera_label.configure(image=imgtk)
-
-        # Use full-sized frame for recognition
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        face_locations = face_recognition.face_locations(rgb_frame)
-        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
-
-        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-            name = "Unknown"
-            if True in matches:
-                match_index = matches.index(True)
-                name = known_face_names[match_index]
-
-            face_image = rgb_frame[top:bottom, left:right]
-            emotion, score = emotion_detector.top_emotion(face_image) or ("Neutral", 0.0)
-            emotion_label.config(text=f"Emotion: {emotion} ({score:.2f})")
-            print(f"{name} - Emotion: {emotion} ({score:.2f})")
-
-    camera_label.after(30, update_camera)
+def send_to_firebase(path, data):
+    url = f"{FIREBASE_URL}/{path}.json"
+    try:
+        response = requests.post(url, json=data)
+        if response.status_code == 200:
+            print(f"Data sent to Firebase at {path}.")
+        else:
+            print(f"Failed to send data to Firebase: {response.text}")
+    except Exception as e:
+        print(f"Firebase error: {e}")
 
 def register_face():
     if not is_face_moving():
@@ -125,17 +97,36 @@ def register_face():
         messagebox.showerror("Error", "Camera error.")
         return
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    face_locations = face_recognition.face_locations(rgb_frame)
     face_encodings = face_recognition.face_encodings(rgb_frame)
-    if len(face_encodings) != 1:
+    if len(face_encodings) != 1 or len(face_locations) != 1:
         messagebox.showwarning("Face Detection", "Ensure one real face is visible.")
         return
-    name = simpledialog.askstring("Register", "Enter your name:")
+    
+    # Now prompt for the name after face is detected
+    name = simpledialog.askstring("Register", "Enter your full name:")
     if not name:
         return
-    save_encoding(name, face_encodings[0])
+    
+    # Capture face image
+    top, right, bottom, left = face_locations[0]
+    face_image = frame[top:bottom, left:right]
+    
+    # Convert face image to base64
+    _, buffer = cv2.imencode('.jpg', face_image)
+    face_base64 = base64.b64encode(buffer).decode('utf-8')
+ 
     messagebox.showinfo("Success", f"Face registered for {name}")
     global known_face_encodings, known_face_names
-    known_face_encodings, known_face_names = load_encodings()
+    
+    # Add student to Firebase for attendance system with face image
+    send_to_firebase("students", {
+        "name": name,
+        "status": "Present",
+        "emoji": "😊",
+        "face_image": face_base64,
+        "timestamp": datetime.datetime.now().isoformat()
+    })
 
 def login_face():
     if not is_face_moving():
@@ -161,20 +152,103 @@ def login_face():
             return
     messagebox.showerror("Login Failed", "Face not recognized.")
 
-login_button = tk.Button(root, text="Login", bg="green", fg="white", width=20, height=2, command=login_face)
-login_button.place(x=400, y=60)
+login_button = create_button(btn_frame, "✅ Take Attendance", "#4CAF50", login_face)
+login_button.pack(pady=15)
 
-register_button = tk.Button(root, text="Register", bg="deepskyblue", fg="white", width=20, height=2, command=register_face)
-register_button.place(x=400, y=140)
+register_button = create_button(btn_frame, "➕ Register", "#2196F3", register_face)
+register_button.pack(pady=15)
 
+# --- Shared State ---
+emotion_detector = FER(mtcnn=True)
+
+frame_lock = threading.Lock()
+current_frame = None
+
+latest_recognition = {
+    "emotion": "Detecting...",
+    "score": 0.0,
+    "name": "Unknown"
+}
+recognition_lock = threading.Lock()
+
+# --- Threads ---
+def capture_frames():
+    global current_frame
+    while True:
+        ret, frame = cap.read()
+        if ret:
+            with frame_lock:
+                current_frame = frame
+        time.sleep(0.01)
+
+def update_camera():
+    with frame_lock:
+        frame = current_frame.copy() if current_frame is not None else None
+
+    if frame is not None:
+        resized_frame = cv2.resize(frame, (400, 300))
+        rgb_display = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(rgb_display)
+        imgtk = ImageTk.PhotoImage(image=img)
+        camera_label.imgtk = imgtk
+        camera_label.configure(image=imgtk)
+
+        with recognition_lock:
+            emotion = latest_recognition["emotion"]
+            score = latest_recognition["score"]
+        emotion_label.config(text=f"Emotion: {emotion} ({score:.2f})")
+
+    camera_label.after(15, update_camera)
+
+def process_faces():
+    global latest_recognition
+    while True:
+        with frame_lock:
+            frame = current_frame.copy() if current_frame is not None else None
+
+        if frame is None:
+            time.sleep(0.1)
+            continue
+
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        face_locations = face_recognition.face_locations(rgb_frame)
+        face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+
+        for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
+            name = "Unknown"
+            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+            if True in matches:
+                match_index = matches.index(True)
+                name = known_face_names[match_index]
+
+            face_image = rgb_frame[top:bottom, left:right]
+            emotion, score = emotion_detector.top_emotion(face_image) or ("Neutral", 0.0)
+
+            with recognition_lock:
+                latest_recognition["name"] = name
+                latest_recognition["emotion"] = emotion
+                latest_recognition["score"] = score
+
+            print(f"{name} - Emotion: {emotion} ({score:.2f})")
+            # Send emotion data to Firebase
+            send_to_firebase("emotions", {
+                "name": name,
+                "emotion": emotion,
+                "score": score,
+                "timestamp": datetime.datetime.now().isoformat()
+            })
+            break
+
+        time.sleep(0.5)
+
+# --- Cleanup ---
 def on_close():
     cap.release()
     root.destroy()
 
 root.protocol("WM_DELETE_WINDOW", on_close)
 
-# Start camera update loop and frame capture thread
 threading.Thread(target=capture_frames, daemon=True).start()
+threading.Thread(target=process_faces, daemon=True).start()
 update_camera()
 root.mainloop()
-    
