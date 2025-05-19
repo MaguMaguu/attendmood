@@ -87,6 +87,14 @@ def send_to_firebase(path, data):
     except Exception as e:
         print(f"Firebase error: {e}")
 
+# --- Persistent Face Data ---
+FACES_PATH = 'faces.pkl'
+try:
+    with open(FACES_PATH, 'rb') as f:
+        known_face_encodings, known_face_names = pickle.load(f)
+except Exception:
+    known_face_encodings, known_face_names = [], []
+
 def register_face():
     if not is_face_moving():
         messagebox.showwarning("Liveness Check", "Please move your face slightly. Static images are not allowed.")
@@ -118,7 +126,11 @@ def register_face():
  
     messagebox.showinfo("Success", f"Face registered for {name}")
     global known_face_encodings, known_face_names
-    
+    # Add to local face data and save
+    known_face_encodings.append(face_encodings[0])
+    known_face_names.append(name)
+    with open(FACES_PATH, 'wb') as f:
+        pickle.dump((known_face_encodings, known_face_names), f)
     # Add student to Firebase for attendance system with face image
     send_to_firebase("students", {
         "name": name,
@@ -127,6 +139,19 @@ def register_face():
         "face_image": face_base64,
         "timestamp": datetime.datetime.now().isoformat()
     })
+
+# --- Emotion to Emoji Mapping ---
+EMOTION_EMOJI = {
+    'angry': '😠',
+    'disgust': '🤢',
+    'fear': '😨',
+    'happy': '😊',
+    'sad': '😢',
+    'surprise': '😲',
+    'neutral': '😐',
+    'Detecting...': '😐',
+    'Neutral': '😐',
+}
 
 def login_face():
     if not is_face_moving():
@@ -138,17 +163,47 @@ def login_face():
         messagebox.showerror("Error", "Camera error.")
         return
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    face_locations = face_recognition.face_locations(rgb_frame)
     face_encodings = face_recognition.face_encodings(rgb_frame)
     if len(face_encodings) == 0:
         messagebox.showwarning("Face Detection", "No face detected.")
         return
-    for face_encoding in face_encodings:
+    for (face_location, face_encoding) in zip(face_locations, face_encodings):
         matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
         name = "Unknown"
         if True in matches:
             index = matches.index(True)
             name = known_face_names[index]
-            messagebox.showinfo("Login", f"Welcome back, {name}!")
+            # Get latest emotion
+            with recognition_lock:
+                emotion = latest_recognition["emotion"]
+                score = latest_recognition["score"]
+            emoji = EMOTION_EMOJI.get(str(emotion).lower(), '😊')
+            # Capture face image for attendance
+            top, right, bottom, left = face_locations[index]
+            face_image = frame[top:bottom, left:right]
+            _, buffer = cv2.imencode('.jpg', face_image)
+            face_base64 = base64.b64encode(buffer).decode('utf-8')
+            # Determine attendance status based on current time
+            now = datetime.datetime.now()
+            hour = now.hour
+            minute = now.minute
+            if hour < 8 or (hour == 8 and minute == 0):
+                status = "Present"
+            elif hour < 12:
+                status = "Late"
+            else:
+                status = "Absent"
+            send_to_firebase("students", {
+                "name": name,
+                "status": status,
+                "emotion": emotion,
+                "score": score,
+                "emoji": emoji,
+                "face_image": face_base64,
+                "timestamp": now.isoformat()
+            })
+            messagebox.showinfo("Login", f"Welcome back, {name}! Emotion: {emotion}")
             return
     messagebox.showerror("Login Failed", "Face not recognized.")
 
@@ -216,7 +271,7 @@ def process_faces():
 
         for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
             name = "Unknown"
-            matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+            matches = face_recognition.compare_faces( known_face_encodings, face_encoding)
             if True in matches:
                 match_index = matches.index(True)
                 name = known_face_names[match_index]
@@ -241,7 +296,7 @@ def process_faces():
 
         time.sleep(0.5)
 
-# --- Cleanup ---
+# --- Cleanup ---   
 def on_close():
     cap.release()
     root.destroy()

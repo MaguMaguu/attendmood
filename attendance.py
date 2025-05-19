@@ -5,6 +5,8 @@ import requests
 import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import db 
+import cv2
+from PIL import Image, ImageTk
 
 
 # --- Setup ---
@@ -79,13 +81,21 @@ def fetch_students():
         response = requests.get(url)
         if response.status_code == 200 and response.json():
             data = response.json()
-            # Firebase returns a dict of dicts
             students = []
             for key, value in data.items():
                 name = value.get('name', 'Unknown')
-                status = value.get('status', 'Present')
-                emoji = value.get('emoji', '😊')
-                students.append((name, status, emoji))
+                checkin_time = value.get('checkin_time', None)
+                if checkin_time:
+                    hour, minute = map(int, checkin_time.split(":"))
+                    if hour > 8 or (hour == 8 and minute > 0):
+                        status = "Late"
+                    else:
+                        status = "Present"
+                else:
+                    status = value.get('status', 'Absent')
+                emoji = value.get('emoji',)
+                face_image = value.get('face_image', None)
+                students.append((name, status, emoji, face_image))
             return students
         else:
             return []
@@ -94,7 +104,6 @@ def fetch_students():
         return []
 
 def populate_student_cards():
-    # Remove any existing cards
     for widget in cards_frame.winfo_children():
         widget.destroy()
     students = fetch_students()
@@ -105,9 +114,21 @@ def populate_student_cards():
     if not students:
         tk.Label(cards_frame, text="No students found in database.", font=('Segoe UI', 12), bg='#f3f6fc').pack(pady=20)
 
-def create_card(parent, name, status, emoji):
+def create_card(parent, name, status, emoji, photo_path=None):
     frame = tk.Frame(parent, bg=COLORS['card_bg'], relief='solid', bd=1)
-    tk.Label(frame, text=f"👤 {name}", font=('Segoe UI', 10, 'bold'), bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=5)
+    if photo_path:
+        try:
+            img = Image.open(photo_path)
+            img = img.resize((80, 80))
+            photo = ImageTk.PhotoImage(img)
+            img_label = tk.Label(frame, image=photo, bg=COLORS['card_bg'])
+            img_label.image = photo  # Keep a reference!
+            img_label.pack(anchor='w', padx=10, pady=5)
+        except Exception as e:
+            # If image fails to load, fallback to icon
+            tk.Label(frame, text=f"👤 {name}", font=('Segoe UI', 10, 'bold'), bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=5)
+    else:
+        tk.Label(frame, text=f"👤 {name}", font=('Segoe UI', 10, 'bold'), bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=5)
 
     status_frame = tk.Frame(frame, bg=COLORS['card_bg'])
     status_frame.pack(anchor='w', padx=10)
@@ -121,6 +142,16 @@ def create_card(parent, name, status, emoji):
     report_btn = tk.Button(frame, text="📩 Report to Parent", font=('Segoe UI', 9), bg=COLORS['button'])
     report_btn.pack(padx=10, pady=5)
     return frame
+
+def capture_face(student_id):
+    cap = cv2.VideoCapture(0)
+    ret, frame = cap.read()
+    if ret:
+        filename = f"faces/{student_id}.jpg"
+        cv2.imwrite(filename, frame)
+    cap.release()
+    cv2.destroyAllWindows()
+    return filename
 
 populate_student_cards()
 
