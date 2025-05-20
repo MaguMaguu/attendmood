@@ -11,7 +11,7 @@ from PIL import Image, ImageTk
 
 # --- Setup ---
 root = tk.Tk()
-root.title("ClassTrack - Attendance")
+root.title("Mood Attend - Attendance")
 root.geometry("900x600")
 root.configure(bg='#f3f6fc')
 
@@ -48,6 +48,7 @@ save_btn.pack(side='right', padx=10, pady=10)
 summary_frame = tk.Frame(root, bg='#f3f6fc')
 summary_frame.pack(fill='x', padx=20, pady=10)
 
+summary_labels = {}
 summaries = [
     ("Present", 0, COLORS['present']),
     ("Absent", 0, COLORS['absent']),
@@ -59,7 +60,9 @@ for title, count, color in summaries:
     card = tk.Frame(summary_frame, bg=color, width=100, height=60, padx=10, pady=10)
     card.pack(side='left', padx=10)
     tk.Label(card, text=title, font=('Segoe UI', 10, 'bold'), bg=color).pack()
-    tk.Label(card, text=str(count), font=('Segoe UI', 14), bg=color).pack()
+    value_label = tk.Label(card, text=str(count), font=('Segoe UI', 14), bg=color)
+    value_label.pack()
+    summary_labels[title] = value_label
 
 # --- Filter ---
 filter_frame = tk.Frame(root, bg='#f3f6fc')
@@ -107,6 +110,16 @@ def populate_student_cards():
     for widget in cards_frame.winfo_children():
         widget.destroy()
     students = fetch_students()
+    # Count statuses
+    present = sum(1 for s in students if s[1] == "Present")
+    absent = sum(1 for s in students if s[1] == "Absent")
+    late = sum(1 for s in students if s[1] == "Late")
+    total = len(students)
+    # Update summary labels
+    summary_labels["Present"].config(text=str(present))
+    summary_labels["Absent"].config(text=str(absent))
+    summary_labels["Late"].config(text=str(late))
+    summary_labels["Total"].config(text=str(total))
     cols = 3
     for i, student in enumerate(students):
         card = create_card(cards_frame, *student)
@@ -139,8 +152,12 @@ def create_card(parent, name, status, emoji, photo_path=None):
     tk.Label(frame, text="Emotional Status:", font=('Segoe UI', 9), bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=(5, 0))
     tk.Label(frame, text=emoji, font=('Segoe UI', 20), bg=COLORS['card_bg']).pack(anchor='w', padx=10)
 
-    report_btn = tk.Button(frame, text="📩 Report to Parent", font=('Segoe UI', 9), bg=COLORS['button'])
-    report_btn.pack(padx=10, pady=5)
+    def show_attendance_history():
+        import tkinter.messagebox as msg
+        msg.showinfo("Previous Attendance", f"Previous attendance for {name} will be shown here.")
+
+    see_prev_btn = tk.Button(frame, text="📅 See Previous Attendance", font=('Segoe UI', 9), bg=COLORS['button'], command=show_attendance_history)
+    see_prev_btn.pack(padx=10, pady=5)
     return frame
 
 def capture_face(student_id):
