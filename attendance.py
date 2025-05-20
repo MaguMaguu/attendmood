@@ -7,6 +7,13 @@ from firebase_admin import credentials
 from firebase_admin import db 
 import cv2
 from PIL import Image, ImageTk
+import tkinter.filedialog as filedialog
+import tkinter.messagebox as msg
+try:
+    import pandas as pd
+    HAS_PANDAS = True
+except ImportError:
+    HAS_PANDAS = False
 
 
 # --- Setup ---
@@ -41,7 +48,27 @@ top_frame.pack(fill='x')
 date_label = tk.Label(top_frame, text=datetime.now().strftime("%A, %B %d, %Y"), font=('Segoe UI', 10), bg=COLORS['navbar'])
 date_label.pack(side='left', padx=10, pady=10)
 
-save_btn = tk.Button(top_frame, text="💾 Save Attendance", bg=COLORS['purple'], fg="white", font=('Segoe UI', 10, 'bold'))
+def export_attendance():
+    students = fetch_students()
+    if not students:
+        msg.showwarning("Export Attendance", "No attendance data to export.")
+        return
+    filetypes = [("Excel files", "*.xlsx"), ("Text files", "*.txt")]
+    file = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=filetypes)
+    if not file:
+        return
+    if file.endswith('.xlsx') and HAS_PANDAS:
+        df = pd.DataFrame(students, columns=["Name", "Status", "Emoji", "Photo Path"])
+        df.to_excel(file, index=False)
+        msg.showinfo("Export Attendance", f"Attendance exported to {file}")
+    else:
+        with open(file, 'w', encoding='utf-8') as f:
+            f.write("Name\tStatus\tEmoji\tPhoto Path\n")
+            for row in students:
+                f.write("\t".join(str(x) for x in row) + "\n")
+        msg.showinfo("Export Attendance", f"Attendance exported to {file}")
+
+save_btn = tk.Button(top_frame, text="💾 Save Attendance", bg=COLORS['purple'], fg="white", font=('Segoe UI', 10, 'bold'), command=export_attendance)
 save_btn.pack(side='right', padx=10, pady=10)
 
 # --- Summary ---
