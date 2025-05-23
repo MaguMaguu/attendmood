@@ -20,7 +20,7 @@ except ImportError:
 # --- Setup ---
 root = tk.Tk()
 root.title("Mood Attend - Attendance")
-root.geometry("1000x650")
+root.geometry("1150x650")
 root.configure(bg='#f3f6fc')
 
 # --- Modern Fonts ---
@@ -160,17 +160,49 @@ filter_dropdown = ttk.Combobox(filter_frame, values=["All Students", "Present", 
 filter_dropdown.set("All Students")
 filter_dropdown.pack(side='left', padx=8)
 
+def on_filter_change(event=None):
+    selected_date = date_picker.get_date()
+    populate_student_cards(selected_date)
+
+filter_dropdown.bind("<<ComboboxSelected>>", on_filter_change)
+
 # --- Student Cards Grid (Attendance Tab) ---
-cards_frame = tk.Frame(attendance_tab, bg='#f3f6fc')
-cards_frame.pack(padx=20, pady=10, fill='both', expand=True)
+# Create an outer frame to hold the canvas and scrollbar
+cards_outer_frame = tk.Frame(attendance_tab, bg='#f3f6fc')
+cards_outer_frame.pack(padx=20, pady=10, fill='both', expand=True)
+
+# Create a canvas and a vertical scrollbar
+cards_canvas = tk.Canvas(cards_outer_frame, bg='#f3f6fc', highlightthickness=0)
+cards_scrollbar = tk.Scrollbar(cards_outer_frame, orient='vertical', command=cards_canvas.yview)
+cards_canvas.configure(yscrollcommand=cards_scrollbar.set)
+cards_canvas.pack(side='left', fill='both', expand=True)
+cards_scrollbar.pack(side='right', fill='y')
+
+# Create the frame inside the canvas
+cards_frame = tk.Frame(cards_canvas, bg='#f3f6fc')
+cards_window = cards_canvas.create_window((0, 0), window=cards_frame, anchor='nw')
+
+def on_cards_frame_configure(event):
+    cards_canvas.configure(scrollregion=cards_canvas.bbox('all'))
+cards_frame.bind('<Configure>', on_cards_frame_configure)
+
+def on_canvas_configure(event):
+    # Make the inner frame width match the canvas width
+    canvas_width = event.width
+    cards_canvas.itemconfig(cards_window, width=canvas_width)
+cards_canvas.bind('<Configure>', on_canvas_configure)
+
+# Enable mousewheel scrolling for the canvas
+
+def _on_mousewheel(event):
+    cards_canvas.yview_scroll(int(-1*(event.delta/120)), 'units')
+cards_canvas.bind_all('<MouseWheel>', _on_mousewheel)
 
 FIREBASE_URL = "https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app"
 
 # --- Emotion to Emoji Mapping ---
 EMOTION_EMOJI = {
     'angry': '😠',
-    'disgust': '🤢',
-    'fear': '😨',
     'happy': '😊',
     'sad': '😢',
     'surprise': '😲',
@@ -186,79 +218,26 @@ def fetch_students(selected_date=None):
         if response.status_code == 200 and response.json():
             data = response.json()
             students = []
-            # Fetch emotion/attendance records for the selected date
-            emotions_url = f"{FIREBASE_URL}/emotions.json"
-            emotions_resp = requests.get(emotions_url)
-            emotions_data = emotions_resp.json() if emotions_resp.status_code == 200 and emotions_resp.json() else {}
-            # Build a map: name -> record for selected_date
-            date_map = {}
-            if selected_date:
-                for key, value in emotions_data.items():
-                    name = value.get('name', '').strip().lower()
-                    ts = value.get('timestamp')
-                    if ts:
-                        try:
-                            from datetime import datetime
-                            # Try to parse ISO format, fallback to other formats
-                            try:
-                                dt = datetime.fromisoformat(ts[:19])
-                            except Exception:
-                                try:
-                                    dt = datetime.strptime(ts[:10], '%Y-%m-%d')
-                                except Exception:
-                                    continue
-                            # Ensure selected_date is a date object
-                            if hasattr(selected_date, 'date'):
-                                sel_date = selected_date.date()
-                            else:
-                                sel_date = selected_date
-                            # Debug print
-                            # print(f"Comparing record date {dt.date()} with selected {sel_date}")
-                            if dt.date() == sel_date:
-                                # Prefer the latest record for the day
-                                if (name not in date_map) or (dt > date_map[name]['dt']):
-                                    date_map[name] = {
-                                        'status': value.get('status', ''),
-                                        'emotion': value.get('emotion', ''),
-                                        'emoji': value.get('emoji', ''),
-                                        'dt': dt,
-                                        'face_image': value.get('face_image', None)
-                                    }
-                        except Exception:
-                            continue
             for key, value in data.items():
                 name = value.get('name', 'Unknown')
-                name_lc = name.strip().lower()
-                if selected_date and name_lc in date_map:
-                    rec = date_map[name_lc]
-                    status = rec['status'] if rec['status'] else 'Absent'
-                    emotion = rec['emotion']
-                    emoji = rec['emoji'] if rec['emoji'] else EMOTION_EMOJI.get(str(emotion).lower(), EMOTION_EMOJI['neutral'])
-                    face_image = rec['face_image']
-                    timestamp = rec['dt']
-                elif selected_date:
-                    status = 'Absent'
-                    emotion = None
-                    emoji = EMOTION_EMOJI['neutral']
-                    face_image = None
-                    timestamp = None
-                else:
-                    checkin_time = value.get('checkin_time', None)
-                    if checkin_time:
-                        hour, minute = map(int, checkin_time.split(":"))
-                        if hour > 8 or (hour == 8 and minute > 0):
-                            status = "Late"
-                        else:
-                            status = "Present"
+                checkin_time = value.get('checkin_time', None)
+                if checkin_time:
+                    hour, minute = map(int, checkin_time.split(":"))
+                    if hour < 8:
+                        status = "Present"
+                    elif 8 <= hour < 12:
+                        status = "Late"
                     else:
-                        status = value.get('status', 'Absent')
-                    emotion = value.get('emotion', None)
-                    emoji = value.get('emoji', None)
-                    if not emoji and emotion:
-                        mapped_emotion = str(emotion).lower()
-                        emoji = EMOTION_EMOJI.get(mapped_emotion, EMOTION_EMOJI['neutral'])
-                    face_image = value.get('face_image', None)
-                    timestamp = None
+                        status = "Absent"
+                else:
+                    status = value.get('status', 'Absent')
+                emotion = value.get('emotion', None)
+                emoji = value.get('emoji', None)
+                if not emoji and emotion:
+                    mapped_emotion = str(emotion).lower()
+                    emoji = EMOTION_EMOJI.get(mapped_emotion, EMOTION_EMOJI['neutral'])
+                face_image = value.get('face_image', None)
+                timestamp = value.get('timestamp', None)
                 students.append((name, status, emoji, face_image, timestamp))
             return students
         else:
@@ -271,25 +250,114 @@ def populate_student_cards(selected_date=None):
     for widget in cards_frame.winfo_children():
         widget.destroy()
     students = fetch_students(selected_date)
-    # Count statuses
-    present = sum(1 for s in students if s[1] == "Present")
-    absent = sum(1 for s in students if s[1] == "Absent")
-    late = sum(1 for s in students if s[1] == "Late")
-    total = len(students)
+    # Filter students based on filter_dropdown
+    filter_value = filter_dropdown.get()
+    if filter_value != "All Students":
+        students = [s for s in students if s[1] == filter_value]
+    # Count statuses (should always count all students for summary)
+    all_students = fetch_students(selected_date)
+    present = sum(1 for s in all_students if s[1] == "Present")
+    absent = sum(1 for s in all_students if s[1] == "Absent")
+    late = sum(1 for s in all_students if s[1] == "Late")
+    total = len(all_students)
     # Update summary labels
     summary_labels["Present"].config(text=str(present))
     summary_labels["Absent"].config(text=str(absent))
     summary_labels["Late"].config(text=str(late))
     summary_labels["Total"].config(text=str(total))
-    cols = 3
+    # Set number of columns to 4 for better fit
+    cols = 4
     for i, student in enumerate(students):
         card = create_card(cards_frame, *student)
-        card.grid(row=i//cols, column=i%cols, padx=10, pady=10, sticky='n')
+        card.grid(row=i//cols, column=i%cols, padx=8, pady=8, sticky='n')
     if not students:
         tk.Label(cards_frame, text="No students found in database.", font=('Segoe UI', 12), bg='#f3f6fc').pack(pady=20)
 
+def fetch_attendance_history(student_name):
+    try:
+        url = f"{FIREBASE_URL}/students.json"
+        response = requests.get(url)
+        if response.status_code == 200 and response.json():
+            data = response.json()
+            # Collect all records for this student (by name)
+            history = []
+            for key, value in data.items():
+                name = value.get('name', 'Unknown')
+                if name == student_name:
+                    status = value.get('status', '-')
+                    emotion = value.get('emotion', '-')
+                    emoji = value.get('emoji', '-')
+                    timestamp = value.get('timestamp', '-')
+                    history.append((timestamp, status, emoji, emotion))
+            # Sort by timestamp descending (latest first)
+            history.sort(reverse=True, key=lambda x: x[0] if x[0] else '')
+            return history
+        else:
+            return []
+    except Exception as e:
+        print(f"Error fetching attendance history: {e}")
+        return []
+
+def show_attendance_history(student_name):
+    history = fetch_attendance_history(student_name)
+    win = tk.Toplevel()
+    win.title(f"Attendance History for {student_name}")
+    win.geometry("540x380")
+    win.configure(bg='#f3f6fc')
+    tk.Label(win, text=f"Attendance History for {student_name}", font=FONT_SUBHEADER, bg='#f3f6fc', anchor='center', justify='center').pack(pady=(12, 6), fill='x')
+    if not history:
+        tk.Label(win, text="No history found.", font=FONT_NORMAL, bg='#f3f6fc').pack(pady=20)
+        return
+    # Table headers
+    header_frame = tk.Frame(win, bg='#f3f6fc')
+    header_frame.pack(fill='x', padx=10)
+    headers = ["Date & Time", "Status", "Emoji", "Emotion"]
+    for i, h in enumerate(headers):
+        lbl = tk.Label(header_frame, text=h, font=FONT_NORMAL, bg='#f3f6fc', fg='#6366f1', width=15, anchor='center', borderwidth=1, relief='solid')
+        lbl.grid(row=0, column=i, padx=0, pady=0, sticky='nsew')
+        header_frame.grid_columnconfigure(i, weight=1)
+    # Separator
+    sep = tk.Frame(win, height=2, bg='#6366f1')
+    sep.pack(fill='x', padx=10, pady=(0, 2))
+    # Table rows
+    table_frame = tk.Frame(win, bg='#f3f6fc')
+    table_frame.pack(fill='both', expand=True, padx=10, pady=5)
+    from datetime import datetime
+    for r, row in enumerate(history):
+        for c, val in enumerate(row):
+            display_val = val
+            if c == 0:  # Timestamp column
+                try:
+                    # Try to parse ISO format
+                    dt = datetime.fromisoformat(val[:19])
+                    display_val = dt.strftime('%Y-%m-%d %H:%M')
+                except Exception:
+                    display_val = val  # fallback to raw string
+            lbl = tk.Label(table_frame, text=display_val, font=FONT_CARD, bg='#f3f6fc', width=15, anchor='center', borderwidth=1, relief='solid')
+            lbl.grid(row=r, column=c, padx=0, pady=0, sticky='nsew')
+            table_frame.grid_columnconfigure(c, weight=1)
+    # Make sure the last row stretches
+    for c in range(len(headers)):
+        table_frame.grid_columnconfigure(c, weight=1)
+
 def create_card(parent, name, status, emoji, photo_path=None, timestamp=None):
-    frame = tk.Frame(parent, bg=COLORS['card_bg'], relief='groove', bd=2, padx=10, pady=10, highlightbackground='#e0e7ff', highlightthickness=1)
+    frame = tk.Frame(
+        parent,
+        bg=COLORS['card_bg'],
+        relief='groove',
+        bd=2,
+        padx=0,  # Reduce padding
+        pady=0,  # Reduce padding
+        highlightbackground='#e0e7ff',
+        highlightthickness=1,
+        width=240,  # Set a fixed width
+        height=300  # Set a fixed height
+    )
+    frame.pack_propagate(False)  # Prevent frame from resizing to fit content
+
+    # --- Add student name at the top ---
+    tk.Label(frame, text=name, font=('Segoe UI', 12, 'bold'), bg=COLORS['card_bg'], fg='black').pack(anchor='center', padx=0, pady=(8, 2))
+
     img_loaded = False
     if photo_path:
         try:
@@ -298,7 +366,7 @@ def create_card(parent, name, status, emoji, photo_path=None, timestamp=None):
             photo = ImageTk.PhotoImage(img)
             img_label = tk.Label(frame, image=photo, bg=COLORS['card_bg'])
             img_label.image = photo  # Keep a reference!
-            img_label.pack(anchor='w', padx=10, pady=5)
+            img_label.pack(anchor='center', padx=0, pady=4)
             img_loaded = True
         except Exception as e:
             pass  # Will try to load from registered_faces below
@@ -317,96 +385,52 @@ def create_card(parent, name, status, emoji, photo_path=None, timestamp=None):
                 photo = ImageTk.PhotoImage(img)
                 img_label = tk.Label(frame, image=photo, bg=COLORS['card_bg'])
                 img_label.image = photo
-                img_label.pack(anchor='w', padx=10, pady=5)
+                img_label.pack(anchor='center', padx=0, pady=4)
                 img_loaded = True
             except Exception as e:
                 pass
     if not img_loaded:
-        tk.Label(frame, text=f"👤 {name}", font=FONT_CARD, bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=5)
+        tk.Label(frame, text=f"👤 {name}", font=FONT_CARD, bg=COLORS['card_bg']).pack(anchor='center', padx=0, pady=4)
 
     status_frame = tk.Frame(frame, bg=COLORS['card_bg'])
-    status_frame.pack(anchor='w', padx=10, pady=(0, 5))
+    status_frame.pack(anchor='center', padx=0, pady=(0, 4))
     for s in ["Present", "Absent", "Late"]:
         bg = "#10b981" if s == status else "#e5e7eb"
         fg = "white" if s == status else "#6b7280"
-        lbl = tk.Label(status_frame, text=s, bg=bg, fg=fg, padx=8, pady=2, font=FONT_CARD, relief='ridge', bd=1)
-        lbl.pack(side='left', padx=3)
+        lbl = tk.Label(status_frame, text=s, bg=bg, fg=fg, padx=6, pady=2, font=FONT_CARD, relief='ridge', bd=1)
+        lbl.pack(side='left', padx=2)
 
     # Add date and time display
     if timestamp:
-        try:
+        from datetime import datetime
+        dt_str = None
+        if isinstance(timestamp, datetime):
             dt_str = timestamp.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
+        elif isinstance(timestamp, str):
+            try:
+                # Try ISO format first
+                dt = datetime.fromisoformat(timestamp[:19])
+                dt_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+            except Exception:
+                try:
+                    dt = datetime.strptime(timestamp[:10], '%Y-%m-%d')
+                    dt_str = dt.strftime('%Y-%m-%d')
+                except Exception:
+                    dt_str = timestamp  # fallback to raw string
+        else:
             dt_str = str(timestamp)
-        tk.Label(frame, text=f"Date & Time: {dt_str}", font=FONT_CARD, bg=COLORS['card_bg'], fg='#6366f1').pack(anchor='w', padx=10, pady=(0, 5))
+        tk.Label(frame, text=f"Date & Time: {dt_str}", font=FONT_CARD, bg=COLORS['card_bg'], fg='#6366f1').pack(anchor='center', padx=0, pady=(0, 4))
     else:
-        tk.Label(frame, text="Date & Time: -", font=FONT_CARD, bg=COLORS['card_bg'], fg='#6366f1').pack(anchor='w', padx=10, pady=(0, 5))
+        tk.Label(frame, text="Date & Time: -", font=FONT_CARD, bg=COLORS['card_bg'], fg='#6366f1').pack(anchor='center', padx=0, pady=(0, 4))
 
-    tk.Label(frame, text="Emotional Status:", font=FONT_CARD, bg=COLORS['card_bg']).pack(anchor='w', padx=10, pady=(5, 0))
-    tk.Label(frame, text=emoji, font=('Segoe UI', 24), bg=COLORS['card_bg']).pack(anchor='w', padx=10)
+    tk.Label(frame, text="Emotional Status:", font=FONT_CARD, bg=COLORS['card_bg']).pack(anchor='center', padx=0, pady=(2, 0))
+    tk.Label(frame, text=emoji, font=('Segoe UI', 24), bg=COLORS['card_bg']).pack(anchor='center', padx=0)
 
-    def show_attendance_history():
-        import tkinter.messagebox as msg
-        import requests
-        from datetime import datetime, timedelta
-        # Fetch all emotion records for this student from Firebase
-        try:
-            url = f"{FIREBASE_URL}/emotions.json"
-            response = requests.get(url)
-            if response.status_code == 200 and response.json():
-                data = response.json()
-                # Get today and the start of the week (Monday)
-                today = datetime.now().date()
-                week_start = today - timedelta(days=today.weekday())
-                # Collect attendance for each day in the week
-                days = [(week_start + timedelta(days=i)) for i in range(7)]
-                day_map = {d: None for d in days}
-                # Find all records for this student in the week
-                for key, value in data.items():
-                    if value.get('name', '').strip().lower() == name.strip().lower():
-                        ts = value.get('timestamp')
-                        if ts:
-                            try:
-                                dt = datetime.fromisoformat(ts[:19])
-                            except Exception:
-                                continue
-                            day = dt.date()
-                            if day in day_map:
-                                # Prefer the latest record for the day
-                                if (day_map[day] is None) or (dt > day_map[day]['dt']):
-                                    day_map[day] = {
-                                        'status': value.get('status', ''),
-                                        'emotion': value.get('emotion', ''),
-                                        'emoji': value.get('emoji', ''),
-                                        'dt': dt
-                                    }
-                # Build the message
-                msg_lines = []
-                for d in days:
-                    rec = day_map[d]
-                    day_str = d.strftime('%A, %Y-%m-%d')
-                    if rec:
-                        status = rec['status'] if rec['status'] else 'N/A'
-                        emotion = rec['emotion'] if rec['emotion'] else 'N/A'
-                        emoji = rec['emoji'] if rec['emoji'] else ''
-                        msg_lines.append(f"{day_str}: {status} {emoji} ({emotion})")
-                    else:
-                        msg_lines.append(f"{day_str}: No record")
-                msg.showinfo("Previous Attendance", "\n".join(msg_lines))
-            else:
-                msg.showinfo("Previous Attendance", "No attendance history found for this student.")
-        except Exception as e:
-            msg.showerror("Error", f"Failed to fetch attendance history: {e}")
+    # --- See Previous Attendance Button ---
+    btn = tk.Button(frame, text="See Previous Attendance", font=FONT_CARD, bg=COLORS['button'], fg='#6366f1', relief='ridge', bd=1,
+                    command=lambda: show_attendance_history(name))
+    btn.pack(anchor='center', pady=(8, 4))
 
-    see_prev_btn = tk.Button(frame, text="\ud83d\udcc5 See Previous Attendance", font=FONT_CARD, bg=COLORS['button'], relief='flat', padx=10, pady=4, bd=0, activebackground='#c7d2fe')
-    see_prev_btn.pack(padx=10, pady=5)
-    # Hover effect for card button
-    def on_card_enter(e):
-        see_prev_btn['bg'] = '#c7d2fe'
-    def on_card_leave(e):
-        see_prev_btn['bg'] = COLORS['button']
-    see_prev_btn.bind("<Enter>", on_card_enter)
-    see_prev_btn.bind("<Leave>", on_card_leave)
     return frame
 
 def capture_face(student_id):
@@ -456,38 +480,5 @@ notebook.bind("<<NotebookTabChanged>>", lambda e: populate_faces_tab() if notebo
 
 # Call with today's date by default
 populate_student_cards(datetime.now().date())
-
-def fetch_attendance_for_date(selected_date):
-    """
-    Fetch attendance records from Firebase for a specific date.
-    selected_date: a datetime.date object
-    Returns: list of records for that date
-    """
-    url = f"{FIREBASE_URL}/emotions.json"
-    response = requests.get(url)
-    if response.status_code != 200 or not response.json():
-        return []
-
-    data = response.json()
-    records_for_date = []
-    for key, value in data.items():
-        ts = value.get('timestamp')
-        if ts:
-            try:
-                dt = datetime.fromisoformat(ts[:19])
-            except Exception:
-                try:
-                    dt = datetime.strptime(ts[:10], '%Y-%m-%d')
-                except Exception:
-                    continue
-            if dt.date() == selected_date:
-                records_for_date.append(value)
-    return records_for_date
-
-# Example usage:
-# from datetime import date
-# today = date.today()
-# attendance_today = fetch_attendance_for_date(today)
-# print(attendance_today)
 
 root.mainloop()

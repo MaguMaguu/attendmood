@@ -98,10 +98,14 @@ FACES_PATH = 'faces.pkl'
 try:
     with open(FACES_PATH, 'rb') as f:
         known_face_encodings, known_face_names = pickle.load(f)
-except Exception:
+    print(f"Loaded {len(known_face_names)} faces: {known_face_names}")
+except Exception as e:
+    print(f"Error loading faces: {e}")
     known_face_encodings, known_face_names = [], []
+    print("No faces loaded. Starting with empty database.")
 
 def register_face():
+    global known_face_encodings, known_face_names
     if not is_face_moving():
         messagebox.showwarning("Liveness Check", "Please move your face slightly. Static images are not allowed.")
         return
@@ -116,17 +120,16 @@ def register_face():
     if len(face_encodings) != 1 or len(face_locations) != 1:
         messagebox.showwarning("Face Detection", "Ensure one real face is visible.")
         return
-    
-    # Now prompt for the name after face is detected
+    # Check if face is already registered
+    matches = face_recognition.compare_faces(known_face_encodings, face_encodings[0])
+    if True in matches:
+        messagebox.showwarning("Already Registered", "This face is already registered.")
+        return
     name = simpledialog.askstring("Register", "Enter your full name:")
     if not name:
         return
-    
-    # Capture face image
     top, right, bottom, left = face_locations[0]
     face_image = frame[top:bottom, left:right]
-    
-    # Save face image locally
     save_dir = 'registered_faces'
     os.makedirs(save_dir, exist_ok=True)
     timestamp_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -134,21 +137,28 @@ def register_face():
     filename = f"{safe_name}_{timestamp_str}.jpg"
     save_path = os.path.join(save_dir, filename)
     cv2.imwrite(save_path, face_image)
-    
     messagebox.showinfo("Success", f"Face registered for {name}\nSaved at: {save_path}")
-    global known_face_encodings, known_face_names
-    # Add to local face data and save
+    # Defensive: reload faces from file to avoid accidental overwrite
+    try:
+        with open(FACES_PATH, 'rb') as f:
+            loaded_encodings, loaded_names = pickle.load(f)
+        if len(loaded_encodings) == len(known_face_encodings) and loaded_names == known_face_names:
+            pass  # Already up to date
+        else:
+            known_face_encodings = loaded_encodings
+            known_face_names = loaded_names
+    except Exception:
+        pass
     known_face_encodings.append(face_encodings[0])
     known_face_names.append(name)
     with open(FACES_PATH, 'wb') as f:
         pickle.dump((known_face_encodings, known_face_names), f)
-    
+    print(f"Registered new face: {name}")
+    print(f"Now have {len(known_face_names)} faces: {known_face_names}")
 
 # --- Emotion to Emoji Mapping ---
 EMOTION_EMOJI = {
     'angry': '😠',
-    'disgust': '🤢',
-    'fear': '😨',
     'happy': '😊',
     'sad': '😢',
     'surprise': '😲',
@@ -156,6 +166,28 @@ EMOTION_EMOJI = {
     'Detecting...': '😐',
     'Neutral': '😐',
 }
+
+def has_attended_today(name):
+    try:
+        url = f"{FIREBASE_URL}/students.json"
+        response = requests.get(url)
+        if response.status_code == 200 and response.json():
+            data = response.json()
+            today = datetime.datetime.now().date()
+            for key, value in data.items():
+                if value.get('name') == name:
+                    timestamp = value.get('timestamp')
+                    if timestamp:
+                        try:
+                            date = datetime.datetime.fromisoformat(timestamp).date()
+                        except Exception:
+                            continue
+                        if date == today:
+                            return True
+        return False
+    except Exception as e:
+        print(f"Error checking attendance: {e}")
+        return False
 
 def login_face():
     if not is_face_moving():
@@ -178,11 +210,15 @@ def login_face():
         if True in matches:
             index = matches.index(True)
             name = known_face_names[index]
+            # Check if already attended today
+            if has_attended_today(name):
+                messagebox.showinfo("Attendance", f"{name}, you have already taken attendance today.")
+                return
             # Get latest emotion
             with recognition_lock:
                 emotion = latest_recognition["emotion"]
                 score = latest_recognition["score"]
-            emoji = EMOTION_EMOJI.get(str(emotion).lower(), '😊')
+            emoji = EMOTION_EMOJI.get(str(emotion).lower(), EMOTION_EMOJI['neutral'])
             # Determine attendance status based on current time
             now = datetime.datetime.now()
             hour = now.hour
@@ -201,7 +237,7 @@ def login_face():
                 "emoji": emoji,
                 "timestamp": now.isoformat()
             })
-            messagebox.showinfo("Success", f"Welcome back, {name}! Emotion: {emotion}")
+            messagebox.showinfo("Success", f"Welcome, {name}! Emotion: {emotion}")
             return
     messagebox.showerror("Attendance Failed", "Face not recognized.")
 
@@ -327,34 +363,36 @@ def auto_attendance_loop():
     last_name = None
     last_time = 0
     global countdown_active, countdown_remaining, countdown_face_name
+    FACE_MATCH_THRESHOLD = 0.5  # Lower is stricter, typical values: 0.4-0.6
     while True:
         with frame_lock:
             frame = current_frame.copy() if current_frame is not None else None
         detected_name = None
-        if frame is not None:
+        if frame is not None and len(known_face_encodings) > 0:
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             face_locations = face_recognition.face_locations(rgb_frame)
             face_encodings = face_recognition.face_encodings(rgb_frame)
             if len(face_encodings) > 0:
                 for (face_location, face_encoding) in zip(face_locations, face_encodings):
-                    matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-                    if True in matches:
-                        index = matches.index(True)
-                        name = known_face_names[index]
+                    distances = face_recognition.face_distance(known_face_encodings, face_encoding)
+                    if len(distances) == 0:
+                        continue
+                    best_match_index = np.argmin(distances)
+                    best_distance = distances[best_match_index]
+                    if best_distance < FACE_MATCH_THRESHOLD:
+                        name = known_face_names[best_match_index]
+                        print(f"Attendance match: {name} (distance: {best_distance:.3f})")
                         detected_name = name
                         now = time.time()
-                        # Only start countdown if not taken for this person in the last 30 seconds
-                        if (name != last_name or (now - last_time) > 30):
+                        if (name != last_name or (now - last_time) > 10):
                             if not countdown_active or countdown_face_name != name:
                                 start_countdown(name)
-                        # If countdown is active and for this face, and finished, take attendance
                         if countdown_active and countdown_face_name == name and countdown_remaining == 0:
                             login_face()
                             last_name = name
                             last_time = now
                             stop_countdown()
                         break
-        # If no registered face detected, stop countdown
         if not detected_name or (countdown_active and detected_name != countdown_face_name):
             stop_countdown()
         time.sleep(0.5)
