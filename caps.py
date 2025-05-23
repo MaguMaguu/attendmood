@@ -71,6 +71,12 @@ emotion_label.place(x=50, y=400)
 btn_frame = tk.Frame(root, bg="#f2f2f2")
 btn_frame.place(x=500, y=150)
 
+# Add timer and instruction labels to the UI
+countdown_label = tk.Label(root, text="", font=("Helvetica", 16, "bold"), bg="#f2f2f2", fg="#d32f2f")
+countdown_label.place(x=500, y=80)
+stay_still_label = tk.Label(root, text="", font=("Helvetica", 14), bg="#f2f2f2", fg="#1976d2")
+stay_still_label.place(x=500, y=120)
+
 def create_button(master, text, bg_color, command=None):
     return tk.Button(master, text=text, width=20, height=2,
                      bg=bg_color, fg="white", font=("Helvetica", 12, "bold"),
@@ -120,25 +126,23 @@ def register_face():
     top, right, bottom, left = face_locations[0]
     face_image = frame[top:bottom, left:right]
     
-    # Convert face image to base64
-    _, buffer = cv2.imencode('.jpg', face_image)
-    face_base64 = base64.b64encode(buffer).decode('utf-8')
- 
-    messagebox.showinfo("Success", f"Face registered for {name}")
+    # Save face image locally
+    save_dir = 'registered_faces'
+    os.makedirs(save_dir, exist_ok=True)
+    timestamp_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+    safe_name = "_".join(name.split())
+    filename = f"{safe_name}_{timestamp_str}.jpg"
+    save_path = os.path.join(save_dir, filename)
+    cv2.imwrite(save_path, face_image)
+    
+    messagebox.showinfo("Success", f"Face registered for {name}\nSaved at: {save_path}")
     global known_face_encodings, known_face_names
     # Add to local face data and save
     known_face_encodings.append(face_encodings[0])
     known_face_names.append(name)
     with open(FACES_PATH, 'wb') as f:
         pickle.dump((known_face_encodings, known_face_names), f)
-    # Add student to Firebase for attendance system with face image
-    send_to_firebase("students", {
-        "name": name,
-        "status": "Present",
-        "emoji": "😊",
-        "face_image": face_base64,
-        "timestamp": datetime.datetime.now().isoformat()
-    })
+    
 
 # --- Emotion to Emoji Mapping ---
 EMOTION_EMOJI = {
@@ -155,7 +159,7 @@ EMOTION_EMOJI = {
 
 def login_face():
     if not is_face_moving():
-        messagebox.showwarning("Liveness Check", "Static images are not allowed. Please move your face.")
+        messagebox.showwarning("Liveness Check", "Images are not allowed. Please move your face.")
         return
     with frame_lock:
         frame = current_frame.copy() if current_frame is not None else None
@@ -179,11 +183,6 @@ def login_face():
                 emotion = latest_recognition["emotion"]
                 score = latest_recognition["score"]
             emoji = EMOTION_EMOJI.get(str(emotion).lower(), '😊')
-            # Capture face image for attendance
-            top, right, bottom, left = face_locations[index]
-            face_image = frame[top:bottom, left:right]
-            _, buffer = cv2.imencode('.jpg', face_image)
-            face_base64 = base64.b64encode(buffer).decode('utf-8')
             # Determine attendance status based on current time
             now = datetime.datetime.now()
             hour = now.hour
@@ -200,15 +199,11 @@ def login_face():
                 "emotion": emotion,
                 "score": score,
                 "emoji": emoji,
-                "face_image": face_base64,
                 "timestamp": now.isoformat()
             })
-            messagebox.showinfo("Login", f"Welcome back, {name}! Emotion: {emotion}")
+            messagebox.showinfo("Success", f"Welcome back, {name}! Emotion: {emotion}")
             return
-    messagebox.showerror("Login Failed", "Face not recognized.")
-
-login_button = create_button(btn_frame, "✅ Take Attendance", "#4CAF50", login_face)
-login_button.pack(pady=15)
+    messagebox.showerror("Attendance Failed", "Face not recognized.")
 
 register_button = create_button(btn_frame, "➕ Register", "#2196F3", register_face)
 register_button.pack(pady=15)
@@ -225,6 +220,40 @@ latest_recognition = {
     "name": "Unknown"
 }
 recognition_lock = threading.Lock()
+
+# Add timer and instruction labels to the UI
+countdown_seconds = 5
+countdown_active = False
+countdown_remaining = 0
+countdown_face_name = None
+countdown_last_frame_time = 0
+
+def start_countdown(name):
+    global countdown_active, countdown_remaining, countdown_face_name
+    countdown_active = True
+    countdown_remaining = countdown_seconds
+    countdown_face_name = name
+    stay_still_label.config(text=f"Stay still, {name}! Taking attendance in...")
+    update_countdown_label()
+
+def stop_countdown():
+    global countdown_active, countdown_remaining, countdown_face_name
+    countdown_active = False
+    countdown_remaining = 0
+    countdown_face_name = None
+    countdown_label.config(text="")
+    stay_still_label.config(text="")
+
+def update_countdown_label():
+    global countdown_remaining
+    if countdown_active and countdown_remaining > 0:
+        countdown_label.config(text=f"{countdown_remaining} seconds")
+        countdown_remaining -= 1
+        root.after(1000, update_countdown_label)
+    elif countdown_active:
+        countdown_label.config(text="Taking attendance...")
+    else:
+        countdown_label.config(text="")
 
 # --- Threads ---
 def capture_frames():
@@ -251,7 +280,8 @@ def update_camera():
         with recognition_lock:
             emotion = latest_recognition["emotion"]
             score = latest_recognition["score"]
-        emotion_label.config(text=f"Emotion: {emotion} ({score:.2f})")
+        safe_score = score if score is not None else 0.0
+        emotion_label.config(text=f"Emotion: {emotion} ({safe_score:.2f})")
 
     camera_label.after(15, update_camera)
 
@@ -278,22 +308,55 @@ def process_faces():
 
             face_image = rgb_frame[top:bottom, left:right]
             emotion, score = emotion_detector.top_emotion(face_image) or ("Neutral", 0.0)
+            # Always map emotion to emoji using EMOTION_EMOJI
+            mapped_emotion = str(emotion).lower() if emotion else "neutral"
+            emoji = EMOTION_EMOJI.get(mapped_emotion, EMOTION_EMOJI["neutral"])
 
             with recognition_lock:
                 latest_recognition["name"] = name
                 latest_recognition["emotion"] = emotion
                 latest_recognition["score"] = score
 
-            print(f"{name} - Emotion: {emotion} ({score:.2f})")
-            # Send emotion data to Firebase
-            send_to_firebase("emotions", {
-                "name": name,
-                "emotion": emotion,
-                "score": score,
-                "timestamp": datetime.datetime.now().isoformat()
-            })
+            print(f"{name} - Emotion: {emotion} ({score:.2f}) {emoji}")
+            # Removed: send_to_firebase("emotions", {...})
             break
 
+        time.sleep(0.5)
+
+def auto_attendance_loop():
+    last_name = None
+    last_time = 0
+    global countdown_active, countdown_remaining, countdown_face_name
+    while True:
+        with frame_lock:
+            frame = current_frame.copy() if current_frame is not None else None
+        detected_name = None
+        if frame is not None:
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            face_locations = face_recognition.face_locations(rgb_frame)
+            face_encodings = face_recognition.face_encodings(rgb_frame)
+            if len(face_encodings) > 0:
+                for (face_location, face_encoding) in zip(face_locations, face_encodings):
+                    matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+                    if True in matches:
+                        index = matches.index(True)
+                        name = known_face_names[index]
+                        detected_name = name
+                        now = time.time()
+                        # Only start countdown if not taken for this person in the last 30 seconds
+                        if (name != last_name or (now - last_time) > 30):
+                            if not countdown_active or countdown_face_name != name:
+                                start_countdown(name)
+                        # If countdown is active and for this face, and finished, take attendance
+                        if countdown_active and countdown_face_name == name and countdown_remaining == 0:
+                            login_face()
+                            last_name = name
+                            last_time = now
+                            stop_countdown()
+                        break
+        # If no registered face detected, stop countdown
+        if not detected_name or (countdown_active and detected_name != countdown_face_name):
+            stop_countdown()
         time.sleep(0.5)
 
 # --- Cleanup ---   
@@ -305,5 +368,6 @@ root.protocol("WM_DELETE_WINDOW", on_close)
 
 threading.Thread(target=capture_frames, daemon=True).start()
 threading.Thread(target=process_faces, daemon=True).start()
+threading.Thread(target=auto_attendance_loop, daemon=True).start()
 update_camera()
 root.mainloop()
