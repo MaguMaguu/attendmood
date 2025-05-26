@@ -20,7 +20,7 @@ except ImportError:
 # --- Setup ---
 root = tk.Tk()
 root.title("Mood Attend - Attendance")
-root.geometry("1150x650")
+root.geometry("1150x700")
 root.configure(bg='#f3f6fc')
 
 # --- Modern Fonts ---
@@ -33,8 +33,18 @@ FONT_CARD = ('Segoe UI', 10)
 # --- Header Bar ---
 header_frame = tk.Frame(root, bg='#6366f1', height=60)
 header_frame.pack(fill='x')
-header_label = tk.Label(header_frame, text="📝 Mood Attend - Attendance System", font=FONT_HEADER, fg='white', bg='#6366f1', pady=10)
-header_label.pack(side='left', padx=20)
+try:
+    logo_img = Image.open("logo.png")
+    logo_img = logo_img.resize((36, 36), Image.LANCZOS)
+    logo_photo = ImageTk.PhotoImage(logo_img)
+    logo_label = tk.Label(header_frame, image=logo_photo, bg='#6366f1')
+    logo_label.image = logo_photo  # Keep reference
+    logo_label.pack(side='left', padx=(20, 8), pady=8)
+except Exception:
+    logo_label = tk.Label(header_frame, text="📝", font=FONT_HEADER, bg='#6366f1', fg='white')
+    logo_label.pack(side='left', padx=(20, 8), pady=8)
+header_label = tk.Label(header_frame, text="Mood Attend - Attendance System", font=FONT_HEADER, fg='white', bg='#6366f1', pady=10)
+header_label.pack(side='left')
 
 cred_path = r'C:\Users\pc\Downloads\database.json'
 cred = credentials.Certificate(cred_path)
@@ -60,65 +70,53 @@ notebook = ttk.Notebook(root, style='Custom.TNotebook')
 notebook.pack(fill='both', expand=True, padx=20, pady=(10, 20))
 
 attendance_tab = tk.Frame(notebook, bg='#f3f6fc')
-faces_tab = tk.Frame(notebook, bg='#f3f6fc')
 notebook.add(attendance_tab, text='Attendance')
-notebook.add(faces_tab, text='Student Faces')
 
 # --- Top Bar (Attendance Tab) ---
 top_frame = tk.Frame(attendance_tab, bg=COLORS['navbar'], height=50)
 top_frame.pack(fill='x', pady=(0, 10))
 
-def on_date_change(event):
-    selected_date = date_picker.get_date()
-    populate_student_cards(selected_date)
-
-# Add a DateEntry (date picker)
-date_picker = DateEntry(top_frame, width=18, font=FONT_NORMAL, background=COLORS['purple'], foreground='white', borderwidth=2, date_pattern='yyyy-mm-dd')
-date_picker.set_date(datetime.now())
-date_picker.pack(side='left', padx=25, pady=10)
-date_picker.bind("<<DateEntrySelected>>", on_date_change)
-
-# Add a button to confirm/show attendance for the selected date
-show_date_btn = tk.Button(
-    top_frame,
-    text="Show Attendance",
-    bg=COLORS['purple'],
-    fg="white",
-    font=FONT_BUTTON,
-    command=lambda: populate_student_cards(date_picker.get_date()),
-    relief='flat',
-    padx=12,
-    pady=6,
-    bd=0,
-    activebackground='#4f46e5'
-)
-show_date_btn.pack(side='left', padx=8, pady=10)
-
-def on_show_date_enter(e):
-    show_date_btn['bg'] = '#4f46e5'
-def on_show_date_leave(e):
-    show_date_btn['bg'] = COLORS['purple']
-show_date_btn.bind("<Enter>", on_show_date_enter)
-show_date_btn.bind("<Leave>", on_show_date_leave)
+# Display the current date as a label instead of a date picker
+today_str = datetime.now().strftime('%Y-%m-%d')
+date_label = tk.Label(top_frame, text=f"Attendance for: {today_str}", font=FONT_NORMAL, bg=COLORS['navbar'], fg=COLORS['purple'])
+date_label.pack(side='left', padx=25, pady=10)
 
 def export_attendance():
     students = fetch_students()
     if not students:
         msg.showwarning("Export Attendance", "No attendance data to export.")
         return
-    filetypes = [("Excel files", "*.xlsx"), ("Text files", "*.txt")]
-    file = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=filetypes)
+    filetypes = [("Text files", "*.txt")]
+    file = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=filetypes)
     if not file:
         return
     if file.endswith('.xlsx') and HAS_PANDAS:
-        df = pd.DataFrame(students, columns=["Name", "Status", "Emoji", "Photo Path"])
+        df = pd.DataFrame(students, columns=["Name", "Status", "Emoji", "Emotion", "Date & Time"])
         df.to_excel(file, index=False)
         msg.showinfo("Export Attendance", f"Attendance exported to {file}")
     else:
+        # Map emoji to emotion text
+        emoji_to_emotion = {
+            '😠': 'angry',
+            '😊': 'happy',
+            '😢': 'sad',
+            '😲': 'surprise',
+            '😐': 'neutral',
+        }
         with open(file, 'w', encoding='utf-8') as f:
-            f.write("Name\tStatus\tEmoji\tPhoto Path\n")
+            f.write("Name\tStatus\tEmoji\tEmotion\tDate & Time\n")
             for row in students:
-                f.write("\t".join(str(x) for x in row) + "\n")
+                name, status, emoji, _, timestamp = row
+                emotion = emoji_to_emotion.get(emoji, 'neutral')
+                # Format timestamp to remove seconds
+                formatted_time = timestamp
+                if timestamp:
+                    try:
+                        dt = datetime.fromisoformat(str(timestamp)[:19])
+                        formatted_time = dt.strftime('%Y-%m-%d %H:%M')
+                    except Exception:
+                        formatted_time = str(timestamp)
+                f.write(f"{name}\t{status}\t{emoji}\t{emotion}\t{formatted_time}\n")
         msg.showinfo("Export Attendance", f"Attendance exported to {file}")
 
 # --- Save Button with Hover Effect ---
@@ -161,7 +159,7 @@ filter_dropdown.set("All Students")
 filter_dropdown.pack(side='left', padx=8)
 
 def on_filter_change(event=None):
-    selected_date = date_picker.get_date()
+    selected_date = datetime.now().date()
     populate_student_cards(selected_date)
 
 filter_dropdown.bind("<<ComboboxSelected>>", on_filter_change)
@@ -207,6 +205,7 @@ EMOTION_EMOJI = {
     'sad': '😢',
     'surprise': '😲',
     'neutral': '😐',
+    'fear': '😨',
     'detecting...': '😐',
     'neutral': '😐',
 }
@@ -217,29 +216,41 @@ def fetch_students(selected_date=None):
         response = requests.get(url)
         if response.status_code == 200 and response.json():
             data = response.json()
-            students = []
+            students_dict = {}
             for key, value in data.items():
                 name = value.get('name', 'Unknown')
                 checkin_time = value.get('checkin_time', None)
-                if checkin_time:
-                    hour, minute = map(int, checkin_time.split(":"))
-                    if hour < 8:
-                        status = "Present"
-                    elif 8 <= hour < 12:
-                        status = "Late"
-                    else:
-                        status = "Absent"
-                else:
-                    status = value.get('status', 'Absent')
-                emotion = value.get('emotion', None)
-                emoji = value.get('emoji', None)
-                if not emoji and emotion:
-                    mapped_emotion = str(emotion).lower()
-                    emoji = EMOTION_EMOJI.get(mapped_emotion, EMOTION_EMOJI['neutral'])
-                face_image = value.get('face_image', None)
                 timestamp = value.get('timestamp', None)
-                students.append((name, status, emoji, face_image, timestamp))
-            return students
+                # Parse the date from timestamp
+                record_date = None
+                if timestamp:
+                    try:
+                        record_date = datetime.fromisoformat(str(timestamp)[:19]).date()
+                    except Exception:
+                        record_date = None
+                # If selected_date is given, only consider records for that date
+                if selected_date is not None and record_date is not None and record_date != selected_date:
+                    continue
+                # Only keep the latest record for each student
+                if name not in students_dict or (
+                    timestamp and students_dict[name][4] and timestamp > students_dict[name][4]
+                ):
+                    if checkin_time:
+                        hour, minute = map(int, checkin_time.split(":"))
+                        if hour < 8:
+                            status = "Present"
+                        else:
+                            status = "Late"
+                    else:
+                        status = value.get('status', 'Absent')
+                    emotion = value.get('emotion', None)
+                    emoji = value.get('emoji', None)
+                    if not emoji and emotion:
+                        mapped_emotion = str(emotion).lower()
+                        emoji = EMOTION_EMOJI.get(mapped_emotion, EMOTION_EMOJI['neutral'])
+                    face_image = value.get('face_image', None)
+                    students_dict[name] = (name, status, emoji, face_image, timestamp)
+            return list(students_dict.values())
         else:
             return []
     except Exception as e:
@@ -249,6 +260,8 @@ def fetch_students(selected_date=None):
 def populate_student_cards(selected_date=None):
     for widget in cards_frame.winfo_children():
         widget.destroy()
+    if selected_date is None:
+        selected_date = datetime.now().date()
     students = fetch_students(selected_date)
     # Filter students based on filter_dropdown
     filter_value = filter_dropdown.get()
@@ -351,7 +364,7 @@ def create_card(parent, name, status, emoji, photo_path=None, timestamp=None):
         highlightbackground='#e0e7ff',
         highlightthickness=1,
         width=240,  # Set a fixed width
-        height=300  # Set a fixed height
+        height=310  # Set a fixed height
     )
     frame.pack_propagate(False)  # Prevent frame from resizing to fit content
 
@@ -395,10 +408,19 @@ def create_card(parent, name, status, emoji, photo_path=None, timestamp=None):
     status_frame = tk.Frame(frame, bg=COLORS['card_bg'])
     status_frame.pack(anchor='center', padx=0, pady=(0, 4))
     for s in ["Present", "Absent", "Late"]:
-        bg = "#10b981" if s == status else "#e5e7eb"
-        fg = "white" if s == status else "#6b7280"
-        lbl = tk.Label(status_frame, text=s, bg=bg, fg=fg, padx=6, pady=2, font=FONT_CARD, relief='ridge', bd=1)
-        lbl.pack(side='left', padx=2)
+        if s == "Absent":
+            if status != "Absent":
+                btn = tk.Button(status_frame, text="Mark as Absent", bg="#ef4444", fg="white", padx=6, pady=2, font=FONT_CARD, relief='ridge', bd=1,
+                                command=lambda n=name: mark_as_absent(n))
+                btn.pack(side='left', padx=2)
+            else:
+                lbl = tk.Label(status_frame, text=s, bg="#ef4444", fg="white", padx=6, pady=2, font=FONT_CARD, relief='ridge', bd=1)
+                lbl.pack(side='left', padx=2)
+        else:
+            bg = "#10b981" if s == status else "#e5e7eb"
+            fg = "white" if s == status else "#6b7280"
+            lbl = tk.Label(status_frame, text=s, bg=bg, fg=fg, padx=6, pady=2, font=FONT_CARD, relief='ridge', bd=1)
+            lbl.pack(side='left', padx=2)
 
     # Add date and time display
     if timestamp:
@@ -443,40 +465,23 @@ def capture_face(student_id):
     cv2.destroyAllWindows()
     return filename
 
-# --- Registered Faces Tab ---
-def populate_faces_tab():
-    for widget in faces_tab.winfo_children():
-        widget.destroy()
-    import os
-    import glob
-    from PIL import Image, ImageTk
-    face_dir = "registered_faces"
-    files = glob.glob(os.path.join(face_dir, "*.jpg"))
-    if not files:
-        tk.Label(faces_tab, text="No registered faces found.", font=FONT_SUBHEADER, bg='#f3f6fc').pack(pady=20)
-        return
-    grid = tk.Frame(faces_tab, bg='#f3f6fc')
-    grid.pack(padx=20, pady=20, fill='both', expand=True)
-    cols = 4
-    for i, file in enumerate(files):
-        try:
-            img = Image.open(file)
-            img = img.resize((80, 80))
-            photo = ImageTk.PhotoImage(img)
-            frame = tk.Frame(grid, bg=COLORS['card_bg'], relief='groove', bd=2, padx=10, pady=10, highlightbackground='#e0e7ff', highlightthickness=1)
-            img_label = tk.Label(frame, image=photo, bg=COLORS['card_bg'])
-            img_label.image = photo
-            img_label.pack(padx=10, pady=5)
-            # Parse name from filename
-            base = os.path.basename(file)
-            name = base.split('_')[0].capitalize()
-            tk.Label(frame, text=name, font=FONT_CARD, bg=COLORS['card_bg']).pack(padx=10, pady=5)
-            frame.grid(row=i//cols, column=i%cols, padx=15, pady=15, sticky='n')
-        except Exception as e:
-            continue
+# Add this function to handle marking as absent
 
-# Call this after root.mainloop() to update faces tab when needed
-notebook.bind("<<NotebookTabChanged>>", lambda e: populate_faces_tab() if notebook.index(notebook.select()) == 1 else None)
+def mark_as_absent(student_name):
+    try:
+        url = f"{FIREBASE_URL}/students.json"
+        response = requests.get(url)
+        if response.status_code == 200 and response.json():
+            data = response.json()
+            for key, value in data.items():
+                if value.get('name') == student_name:
+                    update_url = f"{FIREBASE_URL}/students/{key}.json"
+                    requests.patch(update_url, json={"status": "Absent"})
+                    break
+        # Refresh the UI
+        populate_student_cards(datetime.now().date())
+    except Exception as e:
+        msg.showerror("Error", f"Failed to mark as absent: {e}")
 
 # Call with today's date by default
 populate_student_cards(datetime.now().date())
