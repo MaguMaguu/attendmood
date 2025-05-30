@@ -9,7 +9,14 @@ import cv2
 from PIL import Image, ImageTk
 import tkinter.filedialog as filedialog
 import tkinter.messagebox as msg
-from tkcalendar import DateEntry  # Add this import at the top with other imports
+from tkcalendar import DateEntry  
+import tempfile
+import os
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
 try:
     import pandas as pd
     HAS_PANDAS = True
@@ -17,20 +24,20 @@ except ImportError:
     HAS_PANDAS = False
 
 
-# --- Setup ---
+
 root = tk.Tk()
 root.title("Mood Attend - Attendance")
 root.geometry("1150x700")
 root.configure(bg='#f3f6fc')
 
-# --- Modern Fonts ---
+
 FONT_HEADER = ('Segoe UI', 18, 'bold')
 FONT_SUBHEADER = ('Segoe UI', 12, 'bold')
 FONT_NORMAL = ('Segoe UI', 11)
 FONT_BUTTON = ('Segoe UI', 10, 'bold')
 FONT_CARD = ('Segoe UI', 10)
 
-# --- Header Bar ---
+
 header_frame = tk.Frame(root, bg='#6366f1', height=60)
 header_frame.pack(fill='x')
 try:
@@ -52,7 +59,7 @@ firebase_admin.initialize_app(cred, {
     'databaseURL': 'https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app/'
 })
 ref = db.reference('/')
-# --- Colors ---
+
 COLORS = {
     "present": "#d4f5d2",
     "absent": "#fbd6d6",
@@ -76,48 +83,119 @@ notebook.add(attendance_tab, text='Attendance')
 top_frame = tk.Frame(attendance_tab, bg=COLORS['navbar'], height=50)
 top_frame.pack(fill='x', pady=(0, 10))
 
-# Display the current date as a label instead of a date picker
-today_str = datetime.now().strftime('%Y-%m-%d')
-date_label = tk.Label(top_frame, text=f"Attendance for: {today_str}", font=FONT_NORMAL, bg=COLORS['navbar'], fg=COLORS['purple'])
-date_label.pack(side='left', padx=25, pady=10)
+# Replace date label with DateEntry (datepicker)
+from tkcalendar import DateEntry  # Already imported at the top
+
+def on_date_change(event=None):
+    selected_date = date_picker.get_date()
+    populate_student_cards(selected_date)
+
+date_picker = DateEntry(top_frame, width=12, background=COLORS['purple'], foreground='white', borderwidth=2, font=FONT_NORMAL, date_pattern='yyyy-mm-dd')
+date_picker.set_date(datetime.now())
+date_picker.pack(side='left', padx=25, pady=10)
+date_picker.bind("<<DateEntrySelected>>", on_date_change)
 
 def export_attendance():
-    students = fetch_students()
+    selected_date = date_picker.get_date()
+    students = fetch_students(selected_date)
     if not students:
-        msg.showwarning("Export Attendance", "No attendance data to export.")
+        msg.showwarning("Export Attendance", "No attendance data to export for the selected date.")
         return
-    filetypes = [("Text files", "*.txt")]
-    file = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=filetypes)
+    filetypes = [("Excel files", "*.xlsx")]
+    file = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=filetypes)
     if not file:
         return
-    if file.endswith('.xlsx') and HAS_PANDAS:
-        df = pd.DataFrame(students, columns=["Name", "Status", "Emoji", "Emotion", "Date & Time"])
+    # Prepare data for DataFrame
+    data = []
+    emoji_to_emotion = {
+        '😠': 'angry',
+        '😊': 'happy',
+        '😢': 'sad',
+        '😐': 'neutral',
+    }
+    for row in students:
+        name, status, emoji, _, timestamp = row
+        emotion = emoji_to_emotion.get(emoji, 'neutral')
+        formatted_time = timestamp
+        if timestamp:
+            try:
+                dt = datetime.fromisoformat(str(timestamp)[:19])
+                formatted_time = dt.strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                formatted_time = str(timestamp)
+        data.append([name, status, emoji, emotion, formatted_time])
+    df = pd.DataFrame(data, columns=["Name", "Status", "Emoji", "Emotion", "Date & Time"])
+    try:
         df.to_excel(file, index=False)
         msg.showinfo("Export Attendance", f"Attendance exported to {file}")
-    else:
-        # Map emoji to emotion text
-        emoji_to_emotion = {
-            '😠': 'angry',
-            '😊': 'happy',
-            '😢': 'sad',
-            '😲': 'surprise',
-            '😐': 'neutral',
-        }
-        with open(file, 'w', encoding='utf-8') as f:
-            f.write("Name\tStatus\tEmoji\tEmotion\tDate & Time\n")
-            for row in students:
-                name, status, emoji, _, timestamp = row
-                emotion = emoji_to_emotion.get(emoji, 'neutral')
-                # Format timestamp to remove seconds
-                formatted_time = timestamp
-                if timestamp:
-                    try:
-                        dt = datetime.fromisoformat(str(timestamp)[:19])
-                        formatted_time = dt.strftime('%Y-%m-%d %H:%M')
-                    except Exception:
-                        formatted_time = str(timestamp)
-                f.write(f"{name}\t{status}\t{emoji}\t{emotion}\t{formatted_time}\n")
-        msg.showinfo("Export Attendance", f"Attendance exported to {file}")
+    except Exception as e:
+        msg.showerror("Export Attendance", f"Error exporting to Excel: {e}")
+
+def send_attendance_email():
+    selected_date = date_picker.get_date()
+    students = fetch_students(selected_date)
+    if not students:
+        msg.showwarning("Send Attendance", "No attendance data to send for the selected date.")
+        return
+    # Prompt for recipient email
+    import tkinter.simpledialog as simpledialog
+    recipient = simpledialog.askstring("Send Attendance", "Enter recipient email:")
+    if not recipient:
+        return
+    # Export to a temporary Excel file
+    data = []
+    emoji_to_emotion = {
+        '😠': 'angry',
+        '😊': 'happy',
+        '😢': 'sad',
+        '😐': 'neutral',
+    }
+    for row in students:
+        name, status, emoji, _, timestamp = row
+        emotion = emoji_to_emotion.get(emoji, 'neutral')
+        formatted_time = timestamp
+        if timestamp:
+            try:
+                dt = datetime.fromisoformat(str(timestamp)[:19])
+                formatted_time = dt.strftime('%Y-%m-%d %H:%M')
+            except Exception:
+                formatted_time = str(timestamp)
+        data.append([name, status, emoji, emotion, formatted_time])
+    df = pd.DataFrame(data, columns=["Name", "Status", "Emoji", "Emotion", "Date & Time"])
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
+        temp_filename = tmp.name
+    try:
+        df.to_excel(temp_filename, index=False)
+    except Exception as e:
+        msg.showerror("Send Attendance", f"Failed to export Excel file: {e}")
+        return
+    sender_email = "alonmicoh@gmail.com"
+    app_password = "xsyq ewzj yley qmwj"  # Use an app password, not your main password
+    subject = f"Attendance for {selected_date.strftime('%Y-%m-%d')}"
+    body = f"Please find attached the attendance for {selected_date.strftime('%Y-%m-%d')}."
+    message = MIMEMultipart()
+    message['From'] = sender_email
+    message['To'] = recipient
+    message['Subject'] = subject
+    message.attach(MIMEText(body, 'plain'))
+    with open(temp_filename, 'rb') as attachment:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(attachment.read())
+    encoders.encode_base64(part)
+    part.add_header('Content-Disposition', f"attachment; filename=Attendance_{selected_date.strftime('%Y-%m-%d')}.xlsx")
+    message.attach(part)
+    try:
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+            server.login(sender_email, app_password)
+            server.sendmail(sender_email, recipient, message.as_string())
+        msg.showinfo("Send Attendance", f"Attendance sent to {recipient}!")
+    except Exception as e:
+        msg.showerror("Send Attendance", f"Failed to send email: {e}")
+    finally:
+        try:
+            os.remove(temp_filename)
+        except Exception:
+            pass
 
 # --- Save Button with Hover Effect ---
 def on_enter(e):
@@ -125,10 +203,20 @@ def on_enter(e):
 def on_leave(e):
     save_btn['bg'] = COLORS['purple']
 
+def on_send_enter(e):
+    send_btn['bg'] = '#4f46e5'
+def on_send_leave(e):
+    send_btn['bg'] = COLORS['purple']
+
 save_btn = tk.Button(top_frame, text="💾 Save Attendance", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=export_attendance, relief='flat', padx=16, pady=6, bd=0, activebackground='#4f46e5')
-save_btn.pack(side='right', padx=20, pady=10)
+save_btn.pack(side='right', padx=(10, 5), pady=10)
 save_btn.bind("<Enter>", on_enter)
 save_btn.bind("<Leave>", on_leave)
+
+send_btn = tk.Button(top_frame, text="📧 Send Attendance", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=send_attendance_email, relief='flat', padx=16, pady=6, bd=0, activebackground='#4f46e5')
+send_btn.pack(side='right', padx=(10, 5), pady=10)
+send_btn.bind("<Enter>", on_send_enter)
+send_btn.bind("<Leave>", on_send_leave)
 
 # --- Summary (Attendance Tab) ---
 summary_frame = tk.Frame(attendance_tab, bg='#f3f6fc')
@@ -159,7 +247,7 @@ filter_dropdown.set("All Students")
 filter_dropdown.pack(side='left', padx=8)
 
 def on_filter_change(event=None):
-    selected_date = datetime.now().date()
+    selected_date = date_picker.get_date()
     populate_student_cards(selected_date)
 
 filter_dropdown.bind("<<ComboboxSelected>>", on_filter_change)
@@ -203,11 +291,8 @@ EMOTION_EMOJI = {
     'angry': '😠',
     'happy': '😊',
     'sad': '😢',
-    'surprise': '😲',
     'neutral': '😐',
-    'fear': '😨',
     'detecting...': '😐',
-    'neutral': '😐',
 }
 
 def fetch_students(selected_date=None):
@@ -284,7 +369,7 @@ def populate_student_cards(selected_date=None):
         card = create_card(cards_frame, *student)
         card.grid(row=i//cols, column=i%cols, padx=8, pady=8, sticky='n')
     if not students:
-        tk.Label(cards_frame, text="No students found in database.", font=('Segoe UI', 12), bg='#f3f6fc').pack(pady=20)
+        tk.Label(cards_frame, text="No students present for this date.", font=('Segoe UI', 12), bg='#f3f6fc').pack(pady=20)
 
 def fetch_attendance_history(student_name):
     try:
@@ -479,11 +564,11 @@ def mark_as_absent(student_name):
                     requests.patch(update_url, json={"status": "Absent"})
                     break
         # Refresh the UI
-        populate_student_cards(datetime.now().date())
+        populate_student_cards(date_picker.get_date())
     except Exception as e:
         msg.showerror("Error", f"Failed to mark as absent: {e}")
 
 # Call with today's date by default
-populate_student_cards(datetime.now().date())
+populate_student_cards(date_picker.get_date())
 
 root.mainloop()

@@ -137,7 +137,7 @@ def register_face():
         messagebox.showwarning("Face Detection", "Ensure one real face is visible.")
         return
     # Check if face is already registered
-    matches = face_recognition.compare_faces(encodings, face_encodings[0])
+    matches = face_recognition.compare_faces(encodings, face_encodings[0], tolerance=0.4)
     if True in matches:
         messagebox.showwarning("Already Registered", "This face is already registered.")
         return
@@ -178,7 +178,6 @@ EMOTION_EMOJI = {
     'angry': '😠',
     'happy': '😊',
     'sad': '😢',
-    'surprise': '😲',
     'neutral': '😐',
     'Detecting...': '😐',
     'Neutral': '😐',
@@ -222,7 +221,7 @@ def login_face():
         messagebox.showwarning("Face Detection", "No face detected.")
         return
     for (face_location, face_encoding) in zip(face_locations, face_encodings):
-        matches = face_recognition.compare_faces(encodings, face_encoding)
+        matches = face_recognition.compare_faces(encodings, face_encoding, tolerance=0.4)
         name = "Unknown"
         if True in matches:
             index = matches.index(True)
@@ -259,6 +258,19 @@ def login_face():
 register_button = create_button(btn_frame, "➕ Register", "#2196F3", register_face)
 register_button.pack(pady=15)
 
+# Add pose.png image below the Register button
+try:
+    pose_img = Image.open("pose.png")
+    pose_img = pose_img.resize((220, 180), Image.LANCZOS)
+    pose_photo = ImageTk.PhotoImage(pose_img)
+    pose_label = tk.Label(btn_frame, image=pose_photo, bg="#f2f2f2")
+    pose_label.image = pose_photo  
+    pose_label.pack(pady=(5, 0))
+    pose_text = tk.Label(btn_frame, text="Align your face as shown", font=("Helvetica", 10), bg="#f2f2f2", fg="#555")
+    pose_text.pack(pady=(2, 0))
+except Exception as e:
+    print(f"Could not load pose image: {e}")
+
 # --- Shared State ---
 emotion_detector = FER(mtcnn=True)
 
@@ -273,7 +285,7 @@ latest_recognition = {
 recognition_lock = threading.Lock()
 
 # Add timer and instruction labels to the UI
-countdown_seconds = 3
+countdown_seconds = 1
 countdown_active = False
 countdown_remaining = 0
 countdown_face_name = None
@@ -318,7 +330,7 @@ def capture_frames():
 
 def update_camera():
     with frame_lock:
-        frame = current_frame.copy() if current_frame is not None else None
+        frame = current_frame if current_frame is not None else None
 
     if frame is not None:
         resized_frame = cv2.resize(frame, (400, 300))
@@ -334,10 +346,12 @@ def update_camera():
         safe_score = score if score is not None else 0.0
         emotion_label.config(text=f"Emotion: {emotion} ({safe_score:.2f})")
 
-    camera_label.after(15, update_camera)
+    # Use after with a short interval for continuous updates
+    camera_label.after(10, update_camera)
 
 def process_faces():
     global latest_recognition
+    allowed_emotions = {"happy", "sad", "angry"}
     while True:
         with frame_lock:
             frame = current_frame.copy() if current_frame is not None else None
@@ -352,7 +366,7 @@ def process_faces():
 
         for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
             name = "Unknown"
-            matches = face_recognition.compare_faces(encodings, face_encoding)
+            matches = face_recognition.compare_faces(encodings, face_encoding, tolerance=0.4)
             if True in matches:
                 match_index = matches.index(True)
                 name = names[match_index]
@@ -363,6 +377,9 @@ def process_faces():
                 emotion, score = result
                 if score is None:
                     score = 0.0
+                # Only allow happy, sad, angry
+                if str(emotion).lower() not in allowed_emotions:
+                    emotion = "Neutral"
             else:
                 emotion, score = "Neutral", 0.0
             mapped_emotion = str(emotion).lower() if emotion else "neutral"
