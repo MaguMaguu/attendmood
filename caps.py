@@ -15,6 +15,7 @@ import firebase_admin
 from firebase_admin import credentials
 from firebase_admin import db 
 import base64
+import glob
 
 FIREBASE_URL = "https://moodattend-default-rtdb.asia-southeast1.firebasedatabase.app"
 cred_path = r'C:\Users\pc\Downloads\database.json'
@@ -81,6 +82,21 @@ camera_frame.place(x=50, y=80)
 camera_label = tk.Label(camera_frame, bg="#1e1e1e")
 camera_label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
 
+# Add pose image beside the camera
+try:
+    pose_img = Image.open("pose.png")
+    pose_img = pose_img.resize((250, 200), Image.LANCZOS)
+    pose_photo = ImageTk.PhotoImage(pose_img)
+    pose_frame = tk.Frame(root, bg="#f2f2f2")
+    pose_frame.place(x=470, y=200)  # Position to the right of the camera, vertically centered
+    pose_label = tk.Label(pose_frame, image=pose_photo, bg="#f2f2f2")
+    pose_label.image = pose_photo
+    pose_label.pack()
+    pose_text = tk.Label(pose_frame, text="Align your face as shown", font=("Helvetica", 10), bg="#f2f2f2", fg="#555")
+    pose_text.pack(pady=(2, 0))
+except Exception as e:
+    print(f"Could not load pose image: {e}")
+
 emotion_label = tk.Label(root, text="Emotion: Detecting... (0.00)", font=("Helvetica", 12), bg="#f2f2f2", fg="#555")
 emotion_label.place(x=50, y=400)
 
@@ -109,69 +125,28 @@ def send_to_firebase(path, data):
     except Exception as e:
         print(f"Firebase error: {e}")
 
-# --- Persistent Face Data ---
-FACES_PATH = 'faces.pkl'
-try:
-    with open(FACES_PATH, 'rb') as f:
-        encodings, names = pickle.load(f)
-    print(f"Loaded {len(names)} faces: {names}")
-except Exception as e:
-    print(f"Error loading faces: {e}")
-    encodings, names = [], []
-    print("No faces loaded. Starting with empty database.")
 
-def register_face():
-    global encodings, names
-    if not is_face_moving():
-        messagebox.showwarning("Liveness Check", "Please move your face slightly. Static images are not allowed.")
-        return
-    with frame_lock:
-        frame = current_frame.copy() if current_frame is not None else None
-    if frame is None:
-        messagebox.showerror("Error", "Camera error.")
-        return
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_locations = face_recognition.face_locations(rgb_frame)
-    face_encodings = face_recognition.face_encodings(rgb_frame)
-    if len(face_encodings) != 1 or len(face_locations) != 1:
-        messagebox.showwarning("Face Detection", "Ensure one real face is visible.")
-        return
-    # Check if face is already registered
-    matches = face_recognition.compare_faces(encodings, face_encodings[0], tolerance=0.4)
-    if True in matches:
-        messagebox.showwarning("Already Registered", "This face is already registered.")
-        return
-    name = simpledialog.askstring("Register", "Enter your full name:")
-    if not name:
-        return
-    name = name.strip()
-    top, right, bottom, left = face_locations[0]
-    face_image = frame[top:bottom, left:right]
-    save_dir = 'registered_faces'
-    os.makedirs(save_dir, exist_ok=True)
-    timestamp_str = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
-    safe_name = "_".join(name.split())
-    filename = f"{safe_name}_{timestamp_str}.jpg"
-    save_path = os.path.join(save_dir, filename)
-    cv2.imwrite(save_path, face_image)
-    messagebox.showinfo("Success", f"Face registered for {name}\nSaved at: {save_path}")
-    # Defensive: reload faces from file to avoid accidental overwrite
-    try:
-        with open(FACES_PATH, 'rb') as f:
-            loaded_encodings, loaded_names = pickle.load(f)
-        if len(loaded_encodings) == len(encodings) and loaded_names == names:
-            pass  # Already up to date
-        else:
-            encodings = loaded_encodings
-            names = loaded_names
-    except Exception:
-        pass
-    encodings.append(face_encodings[0])
+# --- Persistent Face Data ---
+encodings = []
+names = []
+registered_faces_dir = 'registered_faces'
+for img_path in glob.glob(os.path.join(registered_faces_dir, '*.jpg')):
+    # Extract name from filename (remove timestamp and extension)
+    base = os.path.basename(img_path)
+    name_part = base.rsplit('_', 1)[0]  # Remove last _timestamp.jpg
+    name = name_part.replace('_', ' ').title()
+    image = cv2.imread(img_path)
+    if image is None:
+        print(f"Warning: Could not read image {img_path}")
+        continue
+    rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    face_encs = face_recognition.face_encodings(rgb_image)
+    if len(face_encs) == 0:
+        print(f"Warning: No face found in {img_path}")
+        continue
+    encodings.append(face_encs[0])
     names.append(name)
-    with open(FACES_PATH, 'wb') as f:
-        pickle.dump((encodings, names), f)
-    print(f"Registered new face: {name}")
-    print(f"Now have {len(names)} faces: {names}")
+print(f"Loaded {len(names)} registered faces: {names}")
 
 # --- Emotion to Emoji Mapping ---
 EMOTION_EMOJI = {
@@ -254,22 +229,6 @@ def login_face():
             messagebox.showinfo("Success", f"Welcome, {name}! Emotion: {emotion}")
             return
     messagebox.showerror("Attendance Failed", "Face not recognized.")
-
-register_button = create_button(btn_frame, "➕ Register", "#2196F3", register_face)
-register_button.pack(pady=15)
-
-# Add pose.png image below the Register button
-try:
-    pose_img = Image.open("pose.png")
-    pose_img = pose_img.resize((220, 180), Image.LANCZOS)
-    pose_photo = ImageTk.PhotoImage(pose_img)
-    pose_label = tk.Label(btn_frame, image=pose_photo, bg="#f2f2f2")
-    pose_label.image = pose_photo  
-    pose_label.pack(pady=(5, 0))
-    pose_text = tk.Label(btn_frame, text="Align your face as shown", font=("Helvetica", 10), bg="#f2f2f2", fg="#555")
-    pose_text.pack(pady=(2, 0))
-except Exception as e:
-    print(f"Could not load pose image: {e}")
 
 # --- Shared State ---
 emotion_detector = FER(mtcnn=True)
