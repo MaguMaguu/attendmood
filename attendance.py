@@ -146,7 +146,7 @@ def show_attendance_window():
     global root
     root = tk.Tk()
     root.title("Mood Attend - Attendance")
-    root.geometry("1400x800")
+    root.geometry("1350x800")
     root.configure(bg='#f3f6fc')
 
     FONT_HEADER = ('Segoe UI', 18, 'bold')
@@ -155,19 +155,19 @@ def show_attendance_window():
     FONT_BUTTON = ('Segoe UI', 10, 'bold')
     FONT_CARD = ('Segoe UI', 10)
 
-    header_frame = tk.Frame(root, bg='#6366f1', height=60)
+    header_frame = tk.Frame(root, bg='#6366f1', height=40)
     header_frame.pack(fill='x')
     try:
         logo_img = Image.open("logo.png")
-        logo_img = logo_img.resize((36, 36), Image.LANCZOS)
+        logo_img = logo_img.resize((24, 24), Image.LANCZOS)
         logo_photo = ImageTk.PhotoImage(logo_img)
         logo_label = tk.Label(header_frame, image=logo_photo, bg='#6366f1')
         logo_label.image = logo_photo  # Keep reference
-        logo_label.pack(side='left', padx=(20, 8), pady=8)
+        logo_label.pack(side='left', padx=(15, 6), pady=4)
     except Exception:
-        logo_label = tk.Label(header_frame, text="📝", font=FONT_HEADER, bg='#6366f1', fg='white')
-        logo_label.pack(side='left', padx=(20, 8), pady=8)
-    header_label = tk.Label(header_frame, text="Mood Attend - Attendance System", font=FONT_HEADER, fg='white', bg='#6366f1', pady=10)
+        logo_label = tk.Label(header_frame, text="📝", font=('Segoe UI', 14, 'bold'), bg='#6366f1', fg='white')
+        logo_label.pack(side='left', padx=(15, 6), pady=4)
+    header_label = tk.Label(header_frame, text="Mood Attend - Attendance System", font=('Segoe UI', 14, 'bold'), fg='white', bg='#6366f1', pady=6)
     header_label.pack(side='left')
 
     COLORS = {
@@ -182,13 +182,21 @@ def show_attendance_window():
         "gray": "#6b7280"
     }
 
+    # Emoji color mapping for easy emotion identification
+    EMOJI_COLORS = {
+        '😊': "#d4f8d4",  # Light green for happy
+        '😢': "#bfdbfe",  # Light blue for sad
+        '😠': "#fecaca",  # Light red for angry
+        '😐': "#e5e7eb",  # Light gray for neutral
+    }
+
     # --- Main Content Frames ---
     attendance_frame = tk.Frame(root, bg='#f3f6fc')
     attendance_frame.pack(fill='both', expand=True)
 
     # --- Attendance Tab Content (moved to attendance_frame) ---
-    top_frame = tk.Frame(attendance_frame, bg=COLORS['navbar'], height=50)
-    top_frame.pack(fill='x', pady=(0, 10))
+    top_frame = tk.Frame(attendance_frame, bg=COLORS['navbar'], height=35)
+    top_frame.pack(fill='x', pady=(0, 5))
 
     # Replace date label with DateEntry (datepicker)
     from tkcalendar import DateEntry  # Already imported at the top
@@ -199,7 +207,7 @@ def show_attendance_window():
 
     date_picker = DateEntry(top_frame, width=12, background=COLORS['purple'], foreground='white', borderwidth=2, font=FONT_NORMAL, date_pattern='yyyy-mm-dd')
     date_picker.set_date(datetime.now())
-    date_picker.pack(side='left', padx=25, pady=10)
+    date_picker.pack(side='left', padx=15, pady=6)
     date_picker.bind("<<DateEntrySelected>>", on_date_change)
 
     def export_attendance():
@@ -233,8 +241,27 @@ def show_attendance_window():
             data.append([name, status, emoji, emotion, formatted_time])
         df = pd.DataFrame(data, columns=["Name", "Status", "Emoji", "Emotion", "Date & Time"])
         try:
-            df.to_excel(file, index=False)
-            msg.showinfo("Export Attendance", f"Attendance exported to {file}")
+            # Create Excel writer with header information
+            with pd.ExcelWriter(file, engine='openpyxl') as writer:
+                # Create header information
+                header_data = [
+                    ["Daily Attendance Report"],
+                    [""],
+                    [f"Date: {selected_date.strftime('%A, %B %d, %Y')}"],
+                    [f"Total Students: {len(data)}"],
+                    [f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                    [""],
+                    [""]
+                ]
+                
+                # Create header DataFrame
+                header_df = pd.DataFrame(header_data)
+                header_df.to_excel(writer, sheet_name='Daily Attendance', index=False, header=False, startrow=0)
+                
+                # Write main data starting after header
+                df.to_excel(writer, sheet_name='Daily Attendance', index=False, startrow=len(header_data))
+                
+            msg.showinfo("Export Attendance", f"Attendance for {selected_date.strftime('%Y-%m-%d')} exported to {file}")
         except Exception as e:
             msg.showerror("Export Attendance", f"Error exporting to Excel: {e}")
 
@@ -276,7 +303,7 @@ def show_attendance_window():
             msg.showerror("Send Attendance", f"Failed to export Excel file: {e}")
             return
         sender_email = "alonmicoh@gmail.com"
-        app_password = "xsyq ewzj yley qmwj"  # Use an app password, not your main password
+        app_password = "xsyq ewzj yley qmwj"
         subject = f"Attendance for {selected_date.strftime('%Y-%m-%d')}"
         body = f"Please find attached the attendance for {selected_date.strftime('%Y-%m-%d')}."
         message = MIMEMultipart()
@@ -314,18 +341,27 @@ def show_attendance_window():
     def on_send_leave(e):
         send_btn['bg'] = COLORS['purple']
 
-    save_btn = tk.Button(top_frame, text="💾 Save Attendance", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=export_attendance, relief='flat', padx=16, pady=6, bd=0, activebackground='#4f46e5')
-    save_btn.pack(side='right', padx=(10, 5), pady=10)
+    save_btn = tk.Button(top_frame, text="💾 Save", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=export_attendance, relief='flat', padx=12, pady=4, bd=0, activebackground='#4f46e5')
+    save_btn.pack(side='right', padx=(8, 4), pady=6)
     save_btn.bind("<Enter>", on_enter)
     save_btn.bind("<Leave>", on_leave)
 
-    send_btn = tk.Button(top_frame, text="📧 Send Attendance", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=send_attendance_email, relief='flat', padx=16, pady=6, bd=0, activebackground='#4f46e5')
-    send_btn.pack(side='right', padx=(10, 5), pady=10)
+    send_btn = tk.Button(top_frame, text="📧 Send", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=send_attendance_email, relief='flat', padx=12, pady=4, bd=0, activebackground='#4f46e5')
+    send_btn.pack(side='right', padx=(8, 4), pady=6)
     send_btn.bind("<Enter>", on_send_enter)
     send_btn.bind("<Leave>", on_send_leave)
 
-    export_monthly_btn = tk.Button(top_frame, text="📅 Export Monthly Summary", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=lambda: export_monthly_summary(), relief='flat', padx=16, pady=6, bd=0, activebackground='#4f46e5')
-    export_monthly_btn.pack(side='right', padx=(10, 5), pady=10)
+    export_weekly_btn = tk.Button(top_frame, text="📊 Weekly", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=lambda: export_weekly_summary(), relief='flat', padx=12, pady=4, bd=0, activebackground='#4f46e5')
+    export_weekly_btn.pack(side='right', padx=(8, 4), pady=6)
+    def on_weekly_enter(e):
+        export_weekly_btn['bg'] = '#4f46e5'
+    def on_weekly_leave(e):
+        export_weekly_btn['bg'] = COLORS['purple']
+    export_weekly_btn.bind("<Enter>", on_weekly_enter)
+    export_weekly_btn.bind("<Leave>", on_weekly_leave)
+
+    export_monthly_btn = tk.Button(top_frame, text="📅 Monthly", bg=COLORS['purple'], fg="white", font=FONT_BUTTON, command=lambda: export_monthly_summary(), relief='flat', padx=12, pady=4, bd=0, activebackground='#4f46e5')
+    export_monthly_btn.pack(side='right', padx=(8, 4), pady=6)
     def on_monthly_enter(e):
         export_monthly_btn['bg'] = '#4f46e5'
     def on_monthly_leave(e):
@@ -335,7 +371,7 @@ def show_attendance_window():
 
     # --- Summary and Pie Chart Side by Side (Attendance Tab) ---
     summary_pie_frame = tk.Frame(attendance_frame, bg='#f3f6fc')
-    summary_pie_frame.pack(fill='x', padx=20, pady=10)
+    summary_pie_frame.pack(fill='x', padx=15, pady=5)
 
     summary_frame = tk.Frame(summary_pie_frame, bg='#f3f6fc')
     summary_frame.pack(side='left', fill='x')
@@ -344,16 +380,36 @@ def show_attendance_window():
     summaries = [
         ("Present", 0, COLORS['present']),
         ("Late", 0, COLORS['late']),
+        ("Absent", 0, COLORS['absent']),  # Added Absent summary card
         ("Total", 0, COLORS['total'])
     ]
 
     for title, count, color in summaries:
-        card = tk.Frame(summary_frame, bg=color, width=120, height=70, padx=16, pady=10, relief='ridge', bd=2, highlightbackground='#e0e7ff', highlightthickness=1)
-        card.pack(side='left', padx=15, pady=5)
-        tk.Label(card, text=title, font=FONT_SUBHEADER, bg=color).pack()
-        value_label = tk.Label(card, text=str(count), font=('Segoe UI', 18, 'bold'), bg=color)
+        card = tk.Frame(summary_frame, bg=color, width=110, height=60, padx=10, pady=6, relief='ridge', bd=1, highlightbackground='#e0e7ff', highlightthickness=1)
+        card.pack(side='left', padx=10, pady=4)
+        tk.Label(card, text=title, font=('Segoe UI', 10, 'bold'), bg=color).pack()
+        value_label = tk.Label(card, text=str(count), font=('Segoe UI', 16, 'bold'), bg=color)
         value_label.pack()
         summary_labels[title] = value_label
+
+    # --- Emotion Color Legend (below summary cards) ---
+    legend_frame = tk.Frame(summary_frame, bg='#f3f6fc')
+    legend_frame.pack(side='left', padx=(25, 0))
+    
+    # Legend title and items in vertical layout
+    tk.Label(legend_frame, text="Emotion Colors:", font=('Segoe UI', 9, 'bold'), bg='#f3f6fc', fg='#6366f1').pack(anchor='w')
+    
+    # Create legend items in a grid
+    legend_items_frame = tk.Frame(legend_frame, bg='#f3f6fc')
+    legend_items_frame.pack()
+    
+    emotions = [('😊', 'Happy', EMOJI_COLORS['😊']), ('😢', 'Sad', EMOJI_COLORS['😢']), 
+                ('😠', 'Angry', EMOJI_COLORS['😠']), ('😐', 'Neutral', EMOJI_COLORS['😐'])]
+    
+    for i, (emoji, emotion_name, color) in enumerate(emotions):
+        legend_item = tk.Frame(legend_items_frame, bg=color, relief='ridge', bd=1)
+        legend_item.grid(row=i//2, column=i%2, padx=3, pady=2, sticky='w')
+        tk.Label(legend_item, text=f"{emoji} {emotion_name}", font=('Segoe UI', 8), bg=color, padx=5, pady=2).pack()
 
     # --- Emotion Dashboard as Scale (Attendance Tab) ---
     pie_frame = tk.Frame(summary_pie_frame, bg='#f3f6fc')
@@ -367,7 +423,7 @@ def show_attendance_window():
         # Draw a vertical bar chart for emotion counts
         import matplotlib.pyplot as plt
         from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-        fig, ax = plt.subplots(figsize=(4, 2.2), dpi=100)
+        fig, ax = plt.subplots(figsize=(3.5, 1.8), dpi=100)
         emojis = list(emotion_counts.keys())
         counts = [emotion_counts[e] for e in emojis]
         ax.bar(emojis, counts, color=['#fef08a', '#bae6fd', '#fecaca', '#e5e7eb'])
@@ -383,13 +439,15 @@ def show_attendance_window():
         chart_canvas.get_tk_widget().pack(fill='both', expand=True)
         plt.close(fig)
 
+
+
     # --- Filter (Attendance Tab) ---
     filter_frame = tk.Frame(attendance_frame, bg='#f3f6fc')
-    filter_frame.pack(fill='x', padx=20, pady=(0, 10))
-    tk.Label(filter_frame, text="Filter:", font=FONT_NORMAL, bg='#f3f6fc').pack(side='left')
-    filter_dropdown = ttk.Combobox(filter_frame, values=["All Students", "Present", "Late"], state='readonly', font=FONT_NORMAL, width=15)
+    filter_frame.pack(fill='x', padx=15, pady=(3, 5))
+    tk.Label(filter_frame, text="Filter:", font=('Segoe UI', 9), bg='#f3f6fc').pack(side='left')
+    filter_dropdown = ttk.Combobox(filter_frame, values=["All Students", "Present","Absent", "Late"], state='readonly', font=('Segoe UI', 9), width=12)
     filter_dropdown.set("All Students")
-    filter_dropdown.pack(side='left', padx=8)
+    filter_dropdown.pack(side='left', padx=6)
 
     def on_filter_change(event=None):
         selected_date = date_picker.get_date()
@@ -400,7 +458,7 @@ def show_attendance_window():
     # --- Student Cards Grid (Attendance Tab) ---
     # Create an outer frame to hold the canvas and scrollbar
     cards_outer_frame = tk.Frame(attendance_frame, bg='#f3f6fc')
-    cards_outer_frame.pack(padx=20, pady=10, fill='both', expand=True)
+    cards_outer_frame.pack(padx=15, pady=5, fill='both', expand=True)
 
     # Create a canvas and a vertical scrollbar
     cards_canvas = tk.Canvas(cards_outer_frame, bg='#f3f6fc', highlightthickness=0)
@@ -496,47 +554,50 @@ def show_attendance_window():
         if selected_date is None:
             selected_date = datetime.now().date()
         students = fetch_students(selected_date)
-        # --- New logic: fetch all users and add absentees ---
+
+        # --- Fetch all registered student names from /students node ---
         try:
-            users_ref = db.reference('/students')
-            users_data = users_ref.get() or {}
-            all_usernames = set()
-            for key, val in users_data.items():
-                uname = val.get('username')
-                if uname:
-                    all_usernames.add(uname)
+            registered_ref = db.reference('/students')
+            registered_data = registered_ref.get() or {}
+            all_names = set()
+            for key, val in registered_data.items():
+                if 'name' in val:
+                    all_names.add(val['name'])
+                elif 'username' in val:
+                    all_names.add(val['username'])
         except Exception as e:
-            all_usernames = set()
-        # Get names of students who have attendance records for the date
+            all_names = set()
+
         attended_names = set(s[0] for s in students)
-        # Add absentees (users with no attendance record for the date)
-        for uname in all_usernames - attended_names:
-            students.append((uname, 'Absent', None, None, None))
-        # Filter students based on filter_dropdown
+        for name in all_names - attended_names:
+            students.append((name, 'Absent', None, None, None))
+
         filter_value = filter_dropdown.get()
         if filter_value != "All Students":
             students = [s for s in students if s[1] == filter_value]
-        # Count statuses (should always count all students for summary)
-        all_students = students  # Now includes absentees
+        all_students = students
         present = sum(1 for s in all_students if s[1] == "Present")
         late = sum(1 for s in all_students if s[1] == "Late")
+        absent = sum(1 for s in all_students if s[1] == "Absent")  # Absent counter
         total = len(all_students)
-        # Update summary labels
         summary_labels["Present"].config(text=str(present))
         summary_labels["Late"].config(text=str(late))
+        summary_labels["Absent"].config(text=str(absent))  # Update Absent label
         summary_labels["Total"].config(text=str(total))
-        # --- Count emotions for scale ---
+        # Count emotions for scale
+        # Only count emotions for students who are not absent
         emotion_counts = {
-            '😊': sum(1 for s in all_students if s[2] == '😊'),
-            '😢': sum(1 for s in all_students if s[2] == '😢'),
-            '😠': sum(1 for s in all_students if s[2] == '😠'),
-            '😐': sum(1 for s in all_students if s[2] == '😐' or not s[2]),
+            '😊': sum(1 for s in all_students if s[2] == '😊' and s[1] != 'Absent'),
+            '😢': sum(1 for s in all_students if s[2] == '😢' and s[1] != 'Absent'),
+            '😠': sum(1 for s in all_students if s[2] == '😠' and s[1] != 'Absent'),
+            '😐': sum(1 for s in all_students if s[2] == '😐' and s[1] != 'Absent'),
+            # 'No Emotion': sum(1 for s in all_students if s[1] == 'Absent'),  # Exclude from chart
         }
         draw_emotion_scale(emotion_counts)
-        cols = 4
+        cols = 5
         for i, student in enumerate(students):
             card = create_card(cards_frame, *student, attendance_tab=True)
-            card.grid(row=i//cols, column=i%cols, padx=8, pady=8, sticky='n')
+            card.grid(row=i//cols, column=i%cols, padx=10, pady=10, sticky='n')
         if not students:
             tk.Label(cards_frame, text="No students present for this date.", font=('Segoe UI', 12), bg='#f3f6fc').pack(pady=20)
 
@@ -568,14 +629,7 @@ def show_attendance_window():
     def show_attendance_history(student_name, selected_date=None):
         # Fetch all records for this student
         history = fetch_attendance_history(student_name)
-        # If a selected_date is provided, filter for records before that date
-        if selected_date is not None:
-            from datetime import datetime
-            history = [row for row in history if row[0] and datetime.fromisoformat(str(row[0])[:19]) < selected_date]
-            # Sort by timestamp descending (latest first)
-            history.sort(reverse=True, key=lambda x: x[0] if x[0] else '')
-            # Only keep the most recent previous record
-            history = history[:1]
+        # Always show all records, ignore selected_date
         win = tk.Toplevel()
         win.title(f"Previous Attendance for {student_name}")
         win.geometry("540x200")
@@ -600,6 +654,7 @@ def show_attendance_window():
                 display_val = val
                 if c == 0:  # Timestamp column
                     try:
+                        from datetime import datetime
                         dt = datetime.fromisoformat(val[:19])
                         display_val = dt.strftime('%Y-%m-%d %H:%M')
                     except Exception:
@@ -620,7 +675,7 @@ def show_attendance_window():
             pady=0,  # Reduce padding
             highlightbackground='#e0e7ff',
             highlightthickness=1,
-            width=240,  # Set a fixed width
+            width=230,  # Set a fixed width
             height=310  # Set a fixed height
         )
         frame.pack_propagate(False)  # Prevent frame from resizing to fit content
@@ -709,7 +764,11 @@ def show_attendance_window():
             # Show emotion/emoji only if not absent in attendance tab
             if not (attendance_tab and status == 'Absent'):
                 tk.Label(frame, text="Emotional Status:", font=FONT_CARD, bg=COLORS['card_bg']).pack(anchor='center', padx=0, pady=(2, 0))
-                tk.Label(frame, text=emoji if emoji else '', font=('Segoe UI', 24), bg=COLORS['card_bg']).pack(anchor='center', padx=0)
+                # Apply color coding to emoji based on emotion
+                emoji_bg_color = EMOJI_COLORS.get(emoji, COLORS['card_bg'])
+                emoji_label = tk.Label(frame, text=emoji if emoji else '', font=('Segoe UI', 24), 
+                                     bg=emoji_bg_color, relief='ridge', bd=1, padx=8, pady=4)
+                emoji_label.pack(anchor='center', padx=0)
             else:
                 tk.Label(frame, text="Emotional Status:", font=FONT_CARD, bg=COLORS['card_bg']).pack(anchor='center', padx=0, pady=(2, 0))
                 tk.Label(frame, text='', font=('Segoe UI', 24), bg=COLORS['card_bg']).pack(anchor='center', padx=0)
@@ -722,7 +781,7 @@ def show_attendance_window():
             # Students tab: show Mark as Absent button if not absent
             if status != 'Absent':
                 btn = tk.Button(frame, text="Mark as Absent", font=FONT_CARD, bg="#ef4444", fg='white', relief='ridge', bd=1,
-                                command=lambda: [mark_as_absent(name), populate_students_cards(date_picker.get_date())])
+                                command=lambda: [mark_as_absent(name), populate_student_cards(date_picker.get_date())])
                 btn.pack(anchor='center', pady=(4, 8))
             else:
                 # If already absent, show nothing (or you could show a label if desired)
@@ -791,9 +850,144 @@ def show_attendance_window():
                         break
             # Refresh both tabs
             populate_student_cards(date_picker.get_date())
-            populate_students_cards(date_picker.get_date())
+            populate_student_cards(date_picker.get_date())
         except Exception as e:
             msg.showerror("Error", f"Failed to mark as absent: {e}")
+
+    def export_weekly_summary():
+        # Dialog for week selection
+        def ask_week_date():
+            win = tk.Toplevel(root)
+            win.title("Select Week")
+            win.geometry("300x180")
+            win.configure(bg='#f3f6fc')
+            tk.Label(win, text="Select any date in the week:", font=FONT_NORMAL, bg='#f3f6fc').pack(pady=(16, 4))
+            tk.Label(win, text="(Monday to Friday will be included)", font=('Segoe UI', 9), bg='#f3f6fc', fg='gray').pack(pady=(0, 8))
+            # Use DateEntry for week selection
+            date_picker = DateEntry(win, width=12, background=COLORS['purple'], foreground='white', borderwidth=2, font=FONT_NORMAL, date_pattern='yyyy-mm-dd')
+            date_picker.set_date(datetime.now())
+            date_picker.pack(pady=4)
+            result = {'date': None}
+            def on_ok():
+                result['date'] = date_picker.get_date()
+                win.destroy()
+            tk.Button(win, text="OK", font=FONT_BUTTON, bg=COLORS['purple'], fg='white', relief='flat', command=on_ok).pack(pady=12)
+            win.grab_set()
+            win.wait_window()
+            return result['date']
+        selected_date = ask_week_date()
+        if not selected_date:
+            return
+        # Calculate the week range (Monday to Friday)
+        weekday = selected_date.weekday()  # Monday is 0, Sunday is 6
+        week_start = selected_date - timedelta(days=weekday)
+        week_end = week_start + timedelta(days=4)  # Friday is 4 days after Monday
+        # Fetch all attendance records for the week
+        try:
+            url = f"{FIREBASE_URL}/students.json"
+            response = requests.get(url)
+            if response.status_code != 200 or not response.json():
+                msg.showerror("Export Weekly Summary", "No attendance data found.")
+                return
+            data = response.json()
+        except Exception as e:
+            msg.showerror("Export Weekly Summary", f"Error fetching data: {e}")
+            return
+        # Get all registered students
+        try:
+            registered_ref = db.reference('/students')
+            registered_data = registered_ref.get() or {}
+            all_students = set()
+            for key, val in registered_data.items():
+                if 'name' in val:
+                    all_students.add(val['name'])
+                elif 'username' in val:
+                    all_students.add(val['username'])
+        except Exception as e:
+            all_students = set()
+
+        # Filter records for the selected week
+        records = []
+        for key, value in data.items():
+            timestamp = value.get('timestamp')
+            name = value.get('name', 'Unknown')
+            status = value.get('status', 'Absent')
+            emotion = value.get('emotion', 'neutral')
+            emoji = value.get('emoji', '😐')
+            if timestamp:
+                try:
+                    dt = datetime.fromisoformat(str(timestamp)[:19])
+                    record_date = dt.date()
+                    if week_start <= record_date <= week_end:
+                        records.append((name, status, emoji, emotion, dt))
+                except Exception:
+                    continue
+
+        # Calculate total weekdays in the period
+        total_weekdays = 5  # Monday to Friday
+
+        # Summarize attendance and emotion per student
+        summary = {}
+        
+        # Initialize all registered students
+        for student_name in all_students:
+            summary[student_name] = {'Present': 0, 'Absent': 0, 'Late': 0, '😊': 0, '😢': 0, '😠': 0, '😐': 0}
+        
+        # Count actual attendance records
+        for name, status, emoji, emotion, dt in records:
+            if name not in summary:
+                summary[name] = {'Present': 0, 'Absent': 0, 'Late': 0, '😊': 0, '😢': 0, '😠': 0, '😐': 0}
+            if status in summary[name]:
+                summary[name][status] += 1
+            else:
+                summary[name][status] = 1
+            if emoji in summary[name]:
+                summary[name][emoji] += 1
+            else:
+                summary[name][emoji] = 1
+
+        # Calculate absences for each student
+        for student_name in summary:
+            attended_days = summary[student_name]['Present'] + summary[student_name]['Late']
+            summary[student_name]['Absent'] = max(0, total_weekdays - attended_days)
+        # Prepare data for DataFrame
+        data = []
+        for name, counts in summary.items():
+            row = [name, counts.get('Present', 0), counts.get('Absent', 0), counts.get('Late', 0),
+                   counts.get('😊', 0), counts.get('😢', 0), counts.get('😠', 0), counts.get('😐', 0)]
+            data.append(row)
+        columns = ["Name", "Present", "Absent", "Late", "Happy (😊)", "Sad (😢)", "Angry (😠)", "Neutral (😐)"]
+        df = pd.DataFrame(data, columns=columns)
+        
+        # Ask for file location
+        filetypes = [("Excel files", "*.xlsx")]
+        file = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=filetypes, title=f"Save Weekly Summary ({week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')}) As")
+        if not file:
+            return
+        try:
+            # Create Excel writer with multiple sheets/formatting
+            with pd.ExcelWriter(file, engine='openpyxl') as writer:
+                # Create header information
+                header_data = [
+                    ["Weekly Attendance Summary"],
+                    [""],
+                    [f"Week Range: {week_start.strftime('%A, %B %d, %Y')} to {week_end.strftime('%A, %B %d, %Y')}"],
+                    [f"Total Weekdays: {total_weekdays}"],
+                    [f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                    [""],
+                    [""]
+                ]
+                
+                # Create header DataFrame
+                header_df = pd.DataFrame(header_data)
+                header_df.to_excel(writer, sheet_name='Weekly Summary', index=False, header=False, startrow=0)
+                
+                # Write main data starting after header
+                df.to_excel(writer, sheet_name='Weekly Summary', index=False, startrow=len(header_data))
+                
+            msg.showinfo("Export Weekly Summary", f"Weekly summary for {week_start.strftime('%Y-%m-%d')} to {week_end.strftime('%Y-%m-%d')} exported to {file}")
+        except Exception as e:
+            msg.showerror("Export Weekly Summary", f"Error exporting to Excel: {e}")
 
     def export_monthly_summary():
         # Dialog for month/year selection
@@ -831,6 +1025,19 @@ def show_attendance_window():
         except Exception as e:
             msg.showerror("Export Monthly Summary", f"Error fetching data: {e}")
             return
+        # Get all registered students
+        try:
+            registered_ref = db.reference('/students')
+            registered_data = registered_ref.get() or {}
+            all_students = set()
+            for key, val in registered_data.items():
+                if 'name' in val:
+                    all_students.add(val['name'])
+                elif 'username' in val:
+                    all_students.add(val['username'])
+        except Exception as e:
+            all_students = set()
+
         # Filter records for the selected month/year
         records = []
         for key, value in data.items():
@@ -846,11 +1053,25 @@ def show_attendance_window():
                         records.append((name, status, emoji, emotion, dt))
                 except Exception:
                     continue
-        if not records:
-            msg.showwarning("Export Monthly Summary", "No attendance records for the selected month.")
-            return
+
+        # Calculate total weekdays in the month
+        import calendar
+        total_days = calendar.monthrange(year, month)[1]
+        first_day = datetime(year, month, 1).weekday()  # Monday is 0
+        total_weekdays = 0
+        for day in range(1, total_days + 1):
+            weekday = (first_day + day - 1) % 7
+            if weekday < 5:  # Monday to Friday (0-4)
+                total_weekdays += 1
+
         # Summarize attendance and emotion per student
         summary = {}
+        
+        # Initialize all registered students
+        for student_name in all_students:
+            summary[student_name] = {'Present': 0, 'Absent': 0, 'Late': 0, '😊': 0, '😢': 0, '😠': 0, '😐': 0}
+        
+        # Count actual attendance records
         for name, status, emoji, emotion, dt in records:
             if name not in summary:
                 summary[name] = {'Present': 0, 'Absent': 0, 'Late': 0, '😊': 0, '😢': 0, '😠': 0, '😐': 0}
@@ -862,6 +1083,11 @@ def show_attendance_window():
                 summary[name][emoji] += 1
             else:
                 summary[name][emoji] = 1
+
+        # Calculate absences for each student
+        for student_name in summary:
+            attended_days = summary[student_name]['Present'] + summary[student_name]['Late']
+            summary[student_name]['Absent'] = max(0, total_weekdays - attended_days)
         # Prepare data for DataFrame
         data = []
         for name, counts in summary.items():
@@ -870,14 +1096,39 @@ def show_attendance_window():
             data.append(row)
         columns = ["Name", "Present", "Absent", "Late", "Happy (😊)", "Sad (😢)", "Angry (😠)", "Neutral (😐)"]
         df = pd.DataFrame(data, columns=columns)
+        
         # Ask for file location
         filetypes = [("Excel files", "*.xlsx")]
         file = filedialog.asksaveasfilename(defaultextension=".xlsx", filetypes=filetypes, title="Save Monthly Summary As")
         if not file:
             return
         try:
-            df.to_excel(file, index=False)
-            msg.showinfo("Export Monthly Summary", f"Monthly summary exported to {file}")
+            # Create Excel writer with multiple sheets/formatting
+            with pd.ExcelWriter(file, engine='openpyxl') as writer:
+                # Create header information
+                month_name = calendar.month_name[month]
+                month_start = datetime(year, month, 1)
+                month_end = datetime(year, month, calendar.monthrange(year, month)[1])
+                
+                header_data = [
+                    ["Monthly Attendance Summary"],
+                    [""],
+                    [f"Month: {month_name} {year}"],
+                    [f"Date Range: {month_start.strftime('%B %d, %Y')} to {month_end.strftime('%B %d, %Y')}"],
+                    [f"Total Weekdays: {total_weekdays}"],
+                    [f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"],
+                    [""],
+                    [""]
+                ]
+                
+                # Create header DataFrame
+                header_df = pd.DataFrame(header_data)
+                header_df.to_excel(writer, sheet_name='Monthly Summary', index=False, header=False, startrow=0)
+                
+                # Write main data starting after header
+                df.to_excel(writer, sheet_name='Monthly Summary', index=False, startrow=len(header_data))
+                
+            msg.showinfo("Export Monthly Summary", f"Monthly summary for {month_name} {year} exported to {file}")
         except Exception as e:
             msg.showerror("Export Monthly Summary", f"Error exporting to Excel: {e}")
 
@@ -888,3 +1139,4 @@ def show_attendance_window():
 # --- Start the app with login window ---
 if __name__ == "__main__":
     show_login_window()
+

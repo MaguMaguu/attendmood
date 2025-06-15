@@ -70,7 +70,7 @@ logo_img = Image.open("logo.png")
 logo_img = logo_img.resize((40, 40), Image.LANCZOS)
 logo_photo = ImageTk.PhotoImage(logo_img)
 logo_label = tk.Label(header_frame, image=logo_photo, bg="#f2f2f2")
-logo_label.image = logo_photo  # Keep a referen
+logo_label.image = logo_photo  
 logo_label.pack(side=tk.LEFT, padx=(0, 10))
 
 header = tk.Label(header_frame, text="MoodAttend", font=("Helvetica", 18, "bold"), bg="#f2f2f2", fg="#333")
@@ -180,8 +180,8 @@ def has_attended_today(name):
         print(f"Error checking attendance: {e}")
         return False
 
-def login_face():
-    if not is_face_moving():
+def login_face(skip_liveness=False):
+    if not skip_liveness and not is_face_moving():
         messagebox.showwarning("Liveness Check", "Images are not allowed. Please move your face.")
         return
     with frame_lock:
@@ -226,7 +226,19 @@ def login_face():
                 "emoji": emoji,
                 "timestamp": now.isoformat()
             })
-            messagebox.showinfo("Success", f"Welcome, {name}! Emotion: {emotion}")
+            # Show a custom popup that disappears after 1 second
+            def show_auto_close_popup(msg):
+                popup = tk.Toplevel(root)
+                popup.overrideredirect(True)
+                popup.configure(bg="#d4edda")
+                popup.attributes("-topmost", True)
+                x = root.winfo_x() + 300
+                y = root.winfo_y() + 200
+                popup.geometry(f"300x60+{x}+{y}")
+                label = tk.Label(popup, text=msg, font=("Helvetica", 14, "bold"), bg="#d4edda", fg="#155724", padx=20, pady=10)
+                label.pack(expand=True, fill="both")
+                popup.after(1000, popup.destroy)
+            show_auto_close_popup(f"Welcome, {name}! Emotion: {emotion}")
             return
     messagebox.showerror("Attendance Failed", "Face not recognized.")
 
@@ -244,7 +256,7 @@ latest_recognition = {
 recognition_lock = threading.Lock()
 
 # Add timer and instruction labels to the UI
-countdown_seconds = 1
+countdown_seconds = 3
 countdown_active = False
 countdown_remaining = 0
 countdown_face_name = None
@@ -385,7 +397,7 @@ def auto_attendance_loop():
                             if not countdown_active or countdown_face_name != first_name:
                                 start_countdown(first_name)
                         if countdown_active and countdown_face_name == first_name and countdown_remaining == 0:
-                            login_face()
+                            login_face(skip_liveness=True)
                             last_name = name
                             last_time = now
                             stop_countdown()
